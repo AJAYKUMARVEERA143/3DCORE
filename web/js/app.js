@@ -5048,7 +5048,7 @@ function snapshotMaterial(mat) {
     return {
         color: mat.color.clone(), roughness: mat.roughness, metalness: mat.metalness,
         emissiveIntensity: mat.emissiveIntensity, emissive: mat.emissive.clone(),
-        transparent: mat.transparent, opacity: mat.opacity,
+        transparent: mat.transparent, opacity: mat.opacity, map: mat.map || null,
     };
 }
 function applyMaterialSnapshot(mat, snap) {
@@ -5059,6 +5059,8 @@ function applyMaterialSnapshot(mat, snap) {
     mat.emissive.copy(snap.emissive);
     mat.transparent = snap.transparent;
     mat.opacity = snap.opacity;
+    mat.map = snap.map;
+    mat.needsUpdate = true;
 }
 
 // GUIDES — SketchUp construction lines: a real dashed reference line, not
@@ -5193,15 +5195,18 @@ const MATERIAL_LIBRARY = {
         { key: 'sc_brown',   name: 'Chocolate Brown',  color: '#6f4e37', roughness: 0.6,  metalness: 0 },
         { key: 'sc_beige',   name: 'Warm Beige',       color: '#d8c3a5', roughness: 0.6,  metalness: 0 },
     ],
+    // `pattern: 'tile'` + `grout` give these a real generated tile+grout
+    // texture (see createTileTexture()) instead of a flat solid color — a
+    // "Subway Tile" material previously looked exactly like a painted wall.
     'Tiles': [
-        { key: 'ti_white_gloss', name: 'White Gloss Tile',   color: '#f0f0f0', roughness: 0.15, metalness: 0 },
-        { key: 'ti_ceramic_grey',name: 'Ceramic Grey Tile',  color: '#9aa0a6', roughness: 0.25, metalness: 0 },
-        { key: 'ti_terracotta',  name: 'Terracotta Tile',    color: '#c1622d', roughness: 0.55, metalness: 0 },
-        { key: 'ti_mosaic_blue', name: 'Mosaic Blue Tile',   color: '#1a5276', roughness: 0.3,  metalness: 0 },
-        { key: 'ti_subway',      name: 'Subway Tile',        color: '#e8e8e8', roughness: 0.2,  metalness: 0 },
-        { key: 'ti_marble',      name: 'Marble Tile',        color: '#e5e0d8', roughness: 0.1,  metalness: 0 },
-        { key: 'ti_hexagon',     name: 'Hexagon Black Tile', color: '#232323', roughness: 0.2,  metalness: 0 },
-        { key: 'ti_slate',       name: 'Slate Tile',         color: '#4a4f52', roughness: 0.45, metalness: 0 },
+        { key: 'ti_white_gloss', name: 'White Gloss Tile',   color: '#f0f0f0', roughness: 0.15, metalness: 0, pattern: 'tile', grout: '#c9c9c9', tilesPerMeter: 2 },
+        { key: 'ti_ceramic_grey',name: 'Ceramic Grey Tile',  color: '#9aa0a6', roughness: 0.25, metalness: 0, pattern: 'tile', grout: '#6e7378', tilesPerMeter: 2 },
+        { key: 'ti_terracotta',  name: 'Terracotta Tile',    color: '#c1622d', roughness: 0.55, metalness: 0, pattern: 'tile', grout: '#8a4620', tilesPerMeter: 2 },
+        { key: 'ti_mosaic_blue', name: 'Mosaic Blue Tile',   color: '#1a5276', roughness: 0.3,  metalness: 0, pattern: 'tile', grout: '#f0f0f0', tilesPerMeter: 4 },
+        { key: 'ti_subway',      name: 'Subway Tile',        color: '#e8e8e8', roughness: 0.2,  metalness: 0, pattern: 'tile', grout: '#9a9a9a', tilesPerMeter: 3 },
+        { key: 'ti_marble',      name: 'Marble Tile',        color: '#e5e0d8', roughness: 0.1,  metalness: 0, pattern: 'tile', grout: '#bfb8ab', tilesPerMeter: 2 },
+        { key: 'ti_hexagon',     name: 'Hexagon Black Tile', color: '#232323', roughness: 0.2,  metalness: 0, pattern: 'tile', grout: '#0e0e0e', tilesPerMeter: 3 },
+        { key: 'ti_slate',       name: 'Slate Tile',         color: '#4a4f52', roughness: 0.45, metalness: 0, pattern: 'tile', grout: '#2e3234', tilesPerMeter: 2 },
     ],
     'Paints': [
         { key: 'pa_matte_white',  name: 'Matte White Paint',  color: '#fafafa', roughness: 0.9,  metalness: 0 },
@@ -5295,6 +5300,44 @@ const MATERIAL_LIBRARY = {
 
 let currentMatCategory = 'Solid Colors';
 
+// Real procedural tile texture — draws actual square tiles + grout lines
+// onto a canvas and wraps it as a genuine Three.js texture, no external
+// image file involved. Cached per (color, grout, density) so repeated
+// applications of the same tile material reuse one texture instead of
+// generating a fresh canvas every time.
+const _tileTextureCache = new Map();
+function createTileTexture(baseColorHex, groutColorHex, tilesPerMeter) {
+    const cacheKey = `${baseColorHex}|${groutColorHex}|${tilesPerMeter}`;
+    if (_tileTextureCache.has(cacheKey)) return _tileTextureCache.get(cacheKey);
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = groutColorHex;
+    ctx.fillRect(0, 0, size, size);
+    const tileSize = size / tilesPerMeter;
+    const inset = Math.max(2, tileSize * 0.03);
+    ctx.fillStyle = baseColorHex;
+    for (let row = 0; row < tilesPerMeter; row++) {
+        for (let col = 0; col < tilesPerMeter; col++) {
+            ctx.fillRect(col * tileSize + inset, row * tileSize + inset, tileSize - inset * 2, tileSize - inset * 2);
+        }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(4, 4);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    _tileTextureCache.set(cacheKey, texture);
+    return texture;
+}
+// Shared getter for any material def carrying a pattern — returns null for
+// plain solid-color defs so callers can just do `material.map = matDefMap(def)`.
+function matDefMap(def) {
+    if (def.pattern === 'tile') return createTileTexture(def.color, def.grout || '#888888', def.tilesPerMeter || 2);
+    return null;
+}
+
 function applyMaterialDefToObject(def, obj) {
     if (!obj || !obj.material) return;
     const before = snapshotMaterial(obj.material);
@@ -5303,6 +5346,8 @@ function applyMaterialDefToObject(def, obj) {
     obj.material.metalness = def.metalness;
     obj.material.transparent = !!def.transparent;
     obj.material.opacity = def.transparent ? def.opacity : 1;
+    obj.material.map = matDefMap(def);
+    obj.material.needsUpdate = true;
 
     const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
     setEl('mat-color', def.color);
@@ -5387,6 +5432,7 @@ function findOrCreateMaterialSlot(obj, def) {
     const mat = new THREE.MeshStandardMaterial({
         color: def.color, roughness: def.roughness, metalness: def.metalness,
         transparent: !!def.transparent, opacity: def.transparent ? def.opacity : 1,
+        map: matDefMap(def),
     });
     mat.userData.matDefKey = def.key;
     mat.userData.matDefCategory = def.category;
@@ -5487,6 +5533,8 @@ function stepMaterialThumbnails() {
         matThumbCube.material.metalness = def.metalness;
         matThumbCube.material.transparent = !!def.transparent;
         matThumbCube.material.opacity = def.transparent ? def.opacity : 1;
+        matThumbCube.material.map = matDefMap(def);
+        matThumbCube.material.needsUpdate = true;
         matThumbRenderer.render(matThumbScene, matThumbCamera);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(matThumbRenderer.domElement, 0, 0, canvas.width, canvas.height);
