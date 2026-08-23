@@ -1146,6 +1146,22 @@ input[type="range"]::-webkit-slider-thumb:hover { background: var(--b-blue-activ
 
 /* Touch-first compact workspace: keep the viewport and essential controls on
    tablets/phones instead of shrinking a desktop editor into unusable panels. */
+#screenshot-flash {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  background: #fff;
+  opacity: 0;
+}
+#screenshot-flash.is-on {
+  animation: screenshot-pop 0.18s ease-out;
+}
+@keyframes screenshot-pop {
+  0% { opacity: 0.55; }
+  100% { opacity: 0; }
+}
+
 #present-bar {
   display: none;
   position: fixed;
