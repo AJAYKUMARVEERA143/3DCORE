@@ -9,6 +9,7 @@ Guidance for working in this repository.
 Authoritative feature history and known limitations: `docs/ROADMAP.md`.
 Full architecture audit and recommended next features: `docs/AUDIT_AND_PLAN.md`.
 Latest bug audit and fixes: `docs/BUG_AUDIT.md`.
+Lightweight render engine + VR/AR plan: `docs/RENDER_XR_PLAN.md`.
 
 ## How to run
 

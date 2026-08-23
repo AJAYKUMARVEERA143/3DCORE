@@ -4,6 +4,8 @@
 
 **Bug audit + fixes (2026-08-23):** see `docs/BUG_AUDIT.md` (grid snap, multi-select, New Scene light leak, 501 stub APIs, honest render labels).
 
+**Lightweight render + VR/AR plan (2026-08-23):** see `docs/RENDER_XR_PLAN.md` (quality ladder to cut GPU cost, WebXR VR walkthrough, ARCore + iOS Quick Look — no second native engine).
+
 ## Product boundary
 
 3D Core is a small, browser-first 2D/3D editor for civil, mechanical, and asset-placement workflows. The first release must run from one codebase on Windows, Linux, macOS, Android tablets, iPadOS, and WebAssembly-capable web browsers. It is **not** a fork of Blender, Cycles, Chili3D, or Pascal Editor. Those projects are design references only; their code and full native runtime are not copied into this product.
