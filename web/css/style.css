@@ -322,6 +322,33 @@ input[type="range"]::-webkit-slider-thumb:hover { background: var(--b-blue-activ
   font-size: 10.5px;
 }
 .v-sub-item:hover { background: var(--b-bg-hover); }
+.v-sub-item.has-menu { position: relative; }
+.v-sub-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 160px;
+  background: var(--b-bg-panel);
+  border: 1px solid var(--b-border-light);
+  border-radius: 4px;
+  z-index: 80;
+  padding: 4px 0;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+.v-sub-item.has-menu:hover .v-sub-dropdown { display: block; }
+.hud-chip {
+  background: #151515;
+  border: 1px solid #333;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #aaa;
+  cursor: pointer;
+  font-family: inherit;
+}
+.hud-chip:hover { border-color: var(--b-orange); color: #ddd; }
+.hud-chip.chip-off { opacity: 0.55; text-decoration: line-through; }
 
 /* Shading Spheres */
 .shading-spheres-group {

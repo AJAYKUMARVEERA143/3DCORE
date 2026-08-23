@@ -23,6 +23,70 @@ let ssaoEnabled = false, bloomEnabled = false, hdriEnvEnabled = false;
 let selectedObject = null;
 let sceneObjects   = [];
 
+// Grid snap — the header chip used to say "Snap: 3D Grid" with no effect.
+// Increment is in world meters (Z-up). Vertex/edge/axis inference still wins
+// over the grid while drawing (same as SketchUp: inferences beat the grid).
+const GRID_SNAP_STEPS = [0.01, 0.1, 0.25, 0.5, 1, 5];
+let gridSnapOn = true;
+let gridSnapStep = 1;
+let transformSpace = 'world'; // 'world' | 'local'
+let groundGrid = null;
+
+function snapScalar(n, size) {
+    if (!size) return n;
+    return Math.round(n / size) * size;
+}
+function snapVec3(v, size) {
+    if (!v || !size) return v;
+    v.x = snapScalar(v.x, size);
+    v.y = snapScalar(v.y, size);
+    v.z = snapScalar(v.z, size);
+    return v;
+}
+function formatSnapStep(step) {
+    if (step < 0.1) return step.toFixed(2) + 'm';
+    if (step < 1) return String(step) + 'm';
+    return step + 'm';
+}
+function applyTransformSnapSettings() {
+    if (!transformControls) return;
+    transformControls.setTranslationSnap(gridSnapOn ? gridSnapStep : null);
+    transformControls.setRotationSnap(gridSnapOn ? (15 * Math.PI / 180) : null);
+    transformControls.setScaleSnap(gridSnapOn ? 0.1 : null);
+    transformControls.setSpace(transformSpace);
+}
+function refreshSnapChip() {
+    const chip = document.getElementById('snap-chip');
+    if (chip) {
+        chip.textContent = gridSnapOn ? `🧲 Snap: ${formatSnapStep(gridSnapStep)}` : '🧲 Snap: Off';
+        chip.classList.toggle('chip-off', !gridSnapOn);
+        chip.title = 'Click to toggle grid snap. Shift-click to cycle increment (1cm → 5m).';
+    }
+    const space = document.getElementById('space-chip');
+    if (space) {
+        space.textContent = transformSpace === 'world' ? '🌐 Global' : '📐 Local';
+        space.title = 'Click to toggle transform space (Global / Local).';
+    }
+}
+function toggleGridSnap(ev) {
+    if (ev && ev.shiftKey) {
+        const i = GRID_SNAP_STEPS.indexOf(gridSnapStep);
+        gridSnapStep = GRID_SNAP_STEPS[(i + 1) % GRID_SNAP_STEPS.length];
+        gridSnapOn = true;
+    } else {
+        gridSnapOn = !gridSnapOn;
+    }
+    applyTransformSnapSettings();
+    refreshSnapChip();
+    setVCB('Grid Snap:', gridSnapOn ? formatSnapStep(gridSnapStep) : 'Off');
+}
+function toggleTransformSpace() {
+    transformSpace = transformSpace === 'world' ? 'local' : 'world';
+    applyTransformSnapSettings();
+    refreshSnapChip();
+    setVCB('Transform:', transformSpace === 'world' ? 'Global' : 'Local');
+}
+
 let activeTool           = 'select';
 let currentInteractionMode = 'object';
 let currentShadingMode   = 'MATERIAL';
@@ -133,35 +197,64 @@ function initApp() {
         orbitControls.enabled = !e.value;
         if (e.value) {
             // Drag started — capture pre-transform state
+            const extras = [];
+            outlinerMultiSelect.forEach(m => {
+                if (m && m !== selectedObject) {
+                    extras.push({ mesh: m, position: m.position.clone(), rotation: m.rotation.clone(), scale: m.scale.clone() });
+                }
+            });
             _dragStartState = selectedObject ? {
                 obj: selectedObject,
                 position: selectedObject.position.clone(),
                 rotation: selectedObject.rotation.clone(),
                 scale: selectedObject.scale.clone(),
+                extras,
             } : null;
         } else if (_dragStartState) {
             // Drag ended — push undo command if anything actually changed
             const before = _dragStartState;
             const obj = before.obj;
             const after = { position: obj.position.clone(), rotation: obj.rotation.clone(), scale: obj.scale.clone() };
+            const extraAfter = (before.extras || []).map(x => ({ mesh: x.mesh, position: x.mesh.position.clone(), rotation: x.mesh.rotation.clone(), scale: x.mesh.scale.clone() }));
+            const extrasMoved = extraAfter.some((a, i) => !a.position.equals(before.extras[i].position));
             const changed = !before.position.equals(after.position) ||
                 !before.rotation.equals(after.rotation) ||
-                !before.scale.equals(after.scale);
+                !before.scale.equals(after.scale) || extrasMoved;
             if (changed) {
                 pushUndo({
-                    undo() { obj.position.copy(before.position); obj.rotation.copy(before.rotation); obj.scale.copy(before.scale); if (selectedObject === obj) updateInspectorFromSelected(); },
-                    redo() { obj.position.copy(after.position); obj.rotation.copy(after.rotation); obj.scale.copy(after.scale); if (selectedObject === obj) updateInspectorFromSelected(); },
+                    undo() {
+                        obj.position.copy(before.position); obj.rotation.copy(before.rotation); obj.scale.copy(before.scale);
+                        (before.extras || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        if (selectedObject === obj) updateInspectorFromSelected();
+                    },
+                    redo() {
+                        obj.position.copy(after.position); obj.rotation.copy(after.rotation); obj.scale.copy(after.scale);
+                        extraAfter.forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        if (selectedObject === obj) updateInspectorFromSelected();
+                    },
                 });
             }
             _dragStartState = null;
         }
     });
     scene.add(transformControls);
+    applyTransformSnapSettings();
+    transformControls.addEventListener('objectChange', () => {
+        if (!selectedObject || !_dragStartState) return;
+        if (gridSnapOn && transformControls.getMode() === 'translate') {
+            snapVec3(selectedObject.position, gridSnapStep);
+        }
+        const extras = _dragStartState.extras || [];
+        if (extras.length) {
+            const delta = selectedObject.position.clone().sub(_dragStartState.position);
+            extras.forEach(x => x.mesh.position.copy(x.position).add(delta));
+        }
+    });
 
     // Ground Grid — 30m x 30m, major every 1m (Blender default)
-    const grid = new THREE.GridHelper(30, 30, 0x444444, 0x2a2a2a);
-    grid.rotation.x = Math.PI / 2;   // Z-up
-    scene.add(grid);
+    groundGrid = new THREE.GridHelper(30, 30, 0x444444, 0x2a2a2a);
+    groundGrid.rotation.x = Math.PI / 2;   // Z-up
+    scene.add(groundGrid);
 
     // Red X axis line
     const xLine = new THREE.Line(
@@ -205,6 +298,7 @@ function initApp() {
     initDockablePanels();
     initViewCube();
     document.querySelectorAll('.units-quick-select').forEach(el => { el.value = appUnits; });
+    refreshSnapChip();
     tryAutoRestoreSession();
 }
 
@@ -244,6 +338,10 @@ function buildDefaultBlenderScene() {
     sceneObjects.forEach(o => scene.remove(o.mesh));
     sceneObjects = [];
     if (transformControls) transformControls.detach();
+    // New Scene used to leave every previous AmbientLight in the graph
+    // (ambient is not tracked in sceneObjects), so each File → New stacked
+    // another 0.35 fill and the default cube got brighter every time.
+    scene.children.filter(c => c.isAmbientLight).forEach(c => scene.remove(c));
 
     // Ambient
     const ambient = new THREE.AmbientLight(0xffffff, 0.35);
@@ -471,8 +569,10 @@ function setupRaycasterSelection(canvas) {
             if (suHits.length > 0 && suHits[0].faceIndex != null) {
                 let obj = suHits[0].object;
                 while (obj && !sceneObjects.some(o => o.mesh === obj)) obj = obj.parent;
+                const faceIndex = suHits[0].faceIndex;
                 if (obj) {
-                    const faceIndex = suHits[0].faceIndex;
+                    if (e.shiftKey) toggleOutlinerMultiSelect(obj, true);
+                    else outlinerMultiSelect.clear();
                     selectObject(obj);
                     ensureNonIndexed(obj);
                     toggleFaceSelection(obj, faceIndex, e.shiftKey);
@@ -499,9 +599,13 @@ function setupRaycasterSelection(canvas) {
                 if (sceneObjects.some(o => o.mesh === obj)) break;
                 obj = obj.parent;
             }
-            if (obj) selectObject(obj);
+            if (obj) {
+                if (e.shiftKey) toggleOutlinerMultiSelect(obj, true);
+                else outlinerMultiSelect.clear();
+                selectObject(obj);
+            }
         } else {
-            selectObject(null);
+            if (!e.shiftKey) { outlinerMultiSelect.clear(); selectObject(null); }
         }
     });
 }
@@ -808,7 +912,21 @@ function sketchPointFromEvent(e, canvas) {
         }
     }
 
+    // Grid snap only when no stronger inference (endpoint/midpoint/axis/tangent)
+    // is active — those already pinned the point and must win.
+    const inferenceWins = _inferenceInfo && ['vertex', 'edge', 'axis', 'tangent'].includes(_inferenceInfo.type);
+    if (gridSnapOn && !inferenceWins) {
+        snapVec3(point, gridSnapStep);
+        if (_inferenceInfo && _inferenceInfo.point) _inferenceInfo.point.copy(point);
+        if (!_inferenceInfo) {
+            _inferenceInfo = { type: 'face', point: point.clone(), label: `Grid ${formatSnapStep(gridSnapStep)}` };
+        } else if (_inferenceInfo.type === 'face') {
+            _inferenceInfo.label = `On Face · Grid ${formatSnapStep(gridSnapStep)}`;
+        }
+    }
+
     updateInferenceGuides(cursorScreen);
+
     _lastSketchCursorPoint = point.clone();
 
     // Live length (+ angle, when available) readout in the VCB while
@@ -2162,7 +2280,7 @@ function setupBoxCircleSelect(canvas) {
         }
 
         const worldPos = new THREE.Vector3();
-        let best = null, bestD = Infinity;
+        const hits = [];
         sceneObjects.forEach(o => {
             if (!o.mesh || o.mesh.name === '_cursor') return;
             o.mesh.getWorldPosition(worldPos);
@@ -2172,11 +2290,15 @@ function setupBoxCircleSelect(canvas) {
             const sy = rect.top + (-proj.y * 0.5 + 0.5) * rect.height;
             if (!test(sx, sy)) return;
             const d = Math.hypot(sx - refPoint.x, sy - refPoint.y);
-            if (d < bestD) { bestD = d; best = o.mesh; }
+            hits.push({ mesh: o.mesh, d });
         });
-
-        selectObject(best);
-        setVCB(activeTool === 'select_box' ? 'Select Box:' : 'Select Circle:', best ? best.name : 'Nothing in region');
+        hits.sort((a, b) => a.d - b.d);
+        if (!e.shiftKey) outlinerMultiSelect.clear();
+        hits.forEach(h => outlinerMultiSelect.add(h.mesh));
+        const best = hits.length ? hits[0].mesh : null;
+        if (best) selectObject(best);
+        else if (!e.shiftKey) selectObject(null);
+        setVCB(activeTool === 'select_box' ? 'Select Box:' : 'Select Circle:', hits.length ? `${hits.length} object(s)` : 'Nothing in region');
         start = null;
         if (suCtx) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
     });
@@ -3099,6 +3221,16 @@ function switchInteractionMode(mode) {
         if (editPills) editPills.style.display = 'none';
         if (hud) hud.innerText = 'User Perspective — Sculpt Mode';
         transformControls.detach();
+    } else if (mode === 'paint') {
+        // There is no texture-paint brush engine. Keep Object Mode behavior
+        // and send the user to the real Materials panel instead of a dead mode.
+        currentInteractionMode = 'object';
+        if (sel) sel.value = 'object';
+        if (editPills) editPills.style.display = 'none';
+        if (hud) hud.innerText = 'User Perspective';
+        if (selectedObject) transformControls.attach(selectedObject);
+        switchRightTab('mat');
+        setVCB('Texture Paint:', 'Not a brush engine — use Materials (per-face paint + image textures).');
     } else {
         if (editPills) editPills.style.display = 'none';
         if (hud) hud.innerText = 'User Perspective';
@@ -3932,6 +4064,38 @@ function frameAllObjects() {
     camera.position.copy(center).addScaledVector(dir, maxDim * 1.8);
     orbitControls.update();
     setVCB('View:', 'Frame All');
+}
+
+function frameSelectedObjects() {
+    const targets = [];
+    if (outlinerMultiSelect.size) outlinerMultiSelect.forEach(m => { if (m) targets.push(m); });
+    else if (selectedObject) targets.push(selectedObject);
+    if (!targets.length) { frameAllObjects(); return; }
+    const box = new THREE.Box3();
+    targets.forEach(m => box.expandByObject(m));
+    const center = new THREE.Vector3(); box.getCenter(center);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z, 1);
+    orbitControls.target.copy(center);
+    const dir = camera.position.clone().sub(orbitControls.target).normalize();
+    camera.position.copy(center).addScaledVector(dir, maxDim * 1.8);
+    orbitControls.update();
+    setVCB('View:', 'Frame Selected');
+}
+
+function selectAllMeshes() {
+    outlinerMultiSelect.clear();
+    sceneObjects.forEach(o => { if (o.mesh) outlinerMultiSelect.add(o.mesh); });
+    const first = sceneObjects.find(o => o.mesh && o.mesh.isMesh);
+    if (first) selectObject(first.mesh);
+    else renderOutliner();
+    setVCB('Select:', `${outlinerMultiSelect.size} object(s)`);
+}
+
+function deselectAllMeshes() {
+    outlinerMultiSelect.clear();
+    selectObject(null);
+    setVCB('Select:', 'None');
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -7483,24 +7647,30 @@ function setVCB(label, value) {
 // OBJECT OPS — Duplicate, Delete, New Scene
 // ─────────────────────────────────────────────────────────────
 function duplicateSelected() {
-    if (!selectedObject || !selectedObject.isMesh) return;
-    const clone = selectedObject.clone();
-    clone.material = Array.isArray(selectedObject.material)
-        ? selectedObject.material.map(m => m.clone())
-        : selectedObject.material.clone();
-    clone.geometry = deepCloneGeometry(selectedObject.geometry);
-    clone.position.x += 2.2;
-    clone.name = selectedObject.name + '.001';
-    const type = (sceneObjects.find(o => o.mesh === selectedObject) || {}).type || 'mesh';
-    scene.add(clone);
-    sceneObjects.push({ name: clone.name, type, mesh: clone });
+    const targets = [];
+    if (outlinerMultiSelect.size) outlinerMultiSelect.forEach(m => { if (m && m.isMesh) targets.push(m); });
+    else if (selectedObject && selectedObject.isMesh) targets.push(selectedObject);
+    if (!targets.length) return;
+    const clones = [];
+    targets.forEach(src => {
+        const clone = src.clone();
+        clone.material = Array.isArray(src.material) ? src.material.map(m => m.clone()) : src.material.clone();
+        clone.geometry = deepCloneGeometry(src.geometry);
+        clone.position.x += 2.2;
+        clone.name = src.name + '.001';
+        const type = (sceneObjects.find(o => o.mesh === src) || {}).type || 'mesh';
+        scene.add(clone);
+        sceneObjects.push({ name: clone.name, type, mesh: clone });
+        clones.push(clone);
+    });
+    outlinerMultiSelect.clear();
+    clones.forEach(c => outlinerMultiSelect.add(c));
     renderOutliner();
-    selectObject(clone);
-    setVCB('Duplicate:', clone.name);
-
+    selectObject(clones[clones.length - 1]);
+    setVCB('Duplicate:', clones.length === 1 ? clones[0].name : `${clones.length} objects`);
     pushUndo({
-        undo() { removeSceneObject(clone); },
-        redo() { scene.add(clone); sceneObjects.push({ name: clone.name, type, mesh: clone }); renderOutliner(); selectObject(clone); },
+        undo() { clones.forEach(c => removeSceneObject(c)); },
+        redo() { clones.forEach(c => { const type = 'mesh'; scene.add(c); sceneObjects.push({ name: c.name, type, mesh: c }); }); renderOutliner(); selectObject(clones[clones.length - 1]); },
     });
 }
 
@@ -7963,20 +8133,24 @@ function toggleFaceOrientation() {
 }
 
 function deleteSelected() {
-    if (!selectedObject) return;
-    const mesh = selectedObject;
-    const entry = sceneObjects.find(o => o.mesh === mesh);
-    if (!entry) return;
-    const type = entry.type;
-    const parent = mesh.parent || scene;
-
-    if (removeSceneObject(mesh)) {
-        setVCB('Deleted:', 'Object removed');
-        pushUndo({
-            undo() { parent.add(mesh); sceneObjects.push({ name: mesh.name, type, mesh }); renderOutliner(); selectObject(mesh); },
-            redo() { removeSceneObject(mesh); },
-        });
-    }
+    const targets = [];
+    if (outlinerMultiSelect.size) outlinerMultiSelect.forEach(m => { if (m) targets.push(m); });
+    else if (selectedObject) targets.push(selectedObject);
+    if (!targets.length) return;
+    const records = [];
+    targets.forEach(mesh => {
+        const entry = sceneObjects.find(o => o.mesh === mesh);
+        if (!entry) return;
+        records.push({ mesh, type: entry.type, parent: mesh.parent || scene });
+    });
+    if (!records.length) return;
+    records.forEach(r => removeSceneObject(r.mesh));
+    outlinerMultiSelect.clear();
+    setVCB('Deleted:', records.length === 1 ? 'Object removed' : `${records.length} objects removed`);
+    pushUndo({
+        undo() { records.forEach(r => { r.parent.add(r.mesh); sceneObjects.push({ name: r.mesh.name, type: r.type, mesh: r.mesh }); }); renderOutliner(); selectObject(records[0].mesh); },
+        redo() { records.forEach(r => removeSceneObject(r.mesh)); },
+    });
 }
 
 function newScene() {

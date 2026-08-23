@@ -8,6 +8,7 @@ Guidance for working in this repository.
 
 Authoritative feature history and known limitations: `docs/ROADMAP.md`.
 Full architecture audit and recommended next features: `docs/AUDIT_AND_PLAN.md`.
+Latest bug audit and fixes: `docs/BUG_AUDIT.md`.
 
 ## How to run
 
@@ -20,7 +21,13 @@ Requires Python 3 (standard library only — no `pip install` for the app).
 
 Optional env: `PORT` (default 8000), `THREED_CORE_HOST` (default `0.0.0.0` for LAN P2P). Signaling WebSocket listens on `PORT + 1`.
 
-There is **no** npm build, linter config, or test suite in git as of 2026-08-23. ROADMAP refers to Playwright scripts that are not in this tree.
+There is **no** npm build or linter config. Integrity checks:
+
+```bash
+python3 -m unittest tests.test_integrity
+```
+
+ROADMAP also refers to Playwright scripts that are not in this tree.
 
 ## Where the real code is
 

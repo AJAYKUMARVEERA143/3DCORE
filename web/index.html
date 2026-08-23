@@ -81,7 +81,7 @@
       <div class="ws-tab-chip" onclick="switchWS(this,'sculpt')">Sculpting</div>
       <div class="ws-tab-chip" onclick="switchWS(this,'anim')">Animation</div>
       <div class="ws-tab-chip" onclick="switchWS(this,'shade')">Shading (PBR)</div>
-      <div class="ws-tab-chip" onclick="switchWS(this,'render')">Cycles Render</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'render')">Rendered View</div>
       <div class="ws-tab-chip" onclick="switchWS(this,'bim')">BIM Architecture</div>
       <div class="ws-tab-chip" onclick="openAssetLibrary()">Asset Library</div>
     </div>
@@ -104,7 +104,7 @@
       <option value="edit">Edit Mode (Tab)</option>
       <option value="sketchup">SketchUp CAD Mode</option>
       <option value="sculpt">Sculpt Mode</option>
-      <option value="paint">Texture Paint</option>
+      <option value="paint">Texture Paint (opens Materials)</option>
     </select>
 
     <div id="edit-mode-pills" class="mesh-select-icons" style="display:none;">
@@ -114,16 +114,42 @@
     </div>
 
     <div class="v-sub-menu">
-      <div class="v-sub-item">View</div>
-      <div class="v-sub-item">Select</div>
+      <div class="v-sub-item has-menu">View
+        <div class="v-sub-dropdown">
+          <div class="top-menu-dropdown-item" onclick="setViewAngle('persp')">Perspective</div>
+          <div class="top-menu-dropdown-item" onclick="setViewAngle('top')">Top</div>
+          <div class="top-menu-dropdown-item" onclick="setViewAngle('front')">Front</div>
+          <div class="top-menu-dropdown-item" onclick="setViewAngle('right')">Right</div>
+          <div class="top-menu-dropdown-item" onclick="toggleOrtho()">Toggle Ortho</div>
+          <div class="top-menu-dropdown-sep"></div>
+          <div class="top-menu-dropdown-item" onclick="frameSelectedObjects()">Frame Selected</div>
+          <div class="top-menu-dropdown-item" onclick="frameAllObjects()">Frame All</div>
+        </div>
+      </div>
+      <div class="v-sub-item has-menu">Select
+        <div class="v-sub-dropdown">
+          <div class="top-menu-dropdown-item" onclick="selectAllMeshes()">Select All</div>
+          <div class="top-menu-dropdown-item" onclick="deselectAllMeshes()">Deselect All</div>
+          <div class="top-menu-dropdown-item" onclick="setActiveTool('select_box')">Box Select</div>
+          <div class="top-menu-dropdown-item" onclick="setActiveTool('select_circle')">Circle Select</div>
+        </div>
+      </div>
       <div class="v-sub-item" onclick="addPrimitive('cube')">Add</div>
-      <div class="v-sub-item">Object</div>
+      <div class="v-sub-item has-menu">Object
+        <div class="v-sub-dropdown">
+          <div class="top-menu-dropdown-item" onclick="duplicateSelected()">Duplicate</div>
+          <div class="top-menu-dropdown-item" onclick="deleteSelected()">Delete</div>
+          <div class="top-menu-dropdown-item" onclick="setActiveTool('move')">Move</div>
+          <div class="top-menu-dropdown-item" onclick="setActiveTool('rotate')">Rotate</div>
+          <div class="top-menu-dropdown-item" onclick="setActiveTool('scale')">Scale</div>
+        </div>
+      </div>
     </div>
   </div>
 
   <div style="display:flex; align-items:center; gap:8px;">
-    <div style="background:#151515; border:1px solid #333; padding:2px 7px; border-radius:3px; font-size:10px; color:#aaa;">🌐 Global</div>
-    <div style="background:#151515; border:1px solid #333; padding:2px 7px; border-radius:3px; font-size:10px; color:#aaa;">🧲 Snap: 3D Grid</div>
+    <button type="button" id="space-chip" class="hud-chip" onclick="toggleTransformSpace()" title="Click to toggle transform space (Global / Local)">🌐 Global</button>
+    <button type="button" id="snap-chip" class="hud-chip" onclick="toggleGridSnap(event)" title="Click to toggle grid snap. Shift-click to cycle increment.">🧲 Snap: 1m</button>
   </div>
 
   <div class="v-toolbar-right">
@@ -135,7 +161,7 @@
       <div class="shading-sphere sphere-wire" onclick="setShadingMode('WIREFRAME')" title="Wireframe (Workbench)"></div>
       <div class="shading-sphere sphere-solid" onclick="setShadingMode('SOLID')" title="Solid (Workbench)"></div>
       <div class="shading-sphere sphere-mat active" onclick="setShadingMode('MATERIAL')" title="Material Preview (EEVEE)"></div>
-      <div class="shading-sphere sphere-render" onclick="setShadingMode('RAYTRACE')" title="Rendered (Cycles Path Tracer)"></div>
+      <div class="shading-sphere sphere-render" onclick="setShadingMode('RAYTRACE')" title="Rendered (WebGL + tone mapping, not a path tracer)"></div>
     </div>
   </div>
 </div>
@@ -557,6 +583,10 @@
                 <span class="prop-label">Metallic</span>
                 <input type="range" id="mat-metal" min="0" max="1" step="0.01" value="0.0" oninput="applyColorMat()">
               </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Emission</span>
+                <input type="range" id="mat-emission" min="0" max="5" step="0.05" value="0.0" oninput="applyColorMat()">
+              </div>
 
             </div>
           </div>
@@ -697,12 +727,13 @@
         <!-- Render Tab -->
         <div id="tab-render" style="display:none; flex-direction:column; gap:4px;">
           <div class="b-accordion-box">
-            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Cycles Render Settings</div>
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Render Settings (WebGL)</div>
             <div class="b-accordion-content">
               <select onchange="setShadingMode(this.value)" style="background:#141414; border:1px solid #333; color:#fff; padding:2px;">
-                <option value="MATERIAL">EEVEE</option>
-                <option value="RAYTRACE" selected>Cycles Path Tracer</option>
-                <option value="SOLID">Workbench</option>
+                <option value="MATERIAL">Material Preview</option>
+                <option value="RAYTRACE" selected>Rendered (WebGL)</option>
+                <option value="SOLID">Solid</option>
+                <option value="WIREFRAME">Wireframe</option>
               </select>
               <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:#ccc; cursor:pointer;">
                 <input type="checkbox" id="shadow-toggle-checkbox" checked onchange="toggleShadows(this.checked)">
