@@ -28,7 +28,8 @@ export function Viewer({ roomSize, floorMaterialId, wallMaterialId }: ViewerProp
   const lampPosition: [number, number, number] = [bedX + BED_FOOTPRINT.width / 2 + 0.4, 1, bedZ]
 
   // Window on the wall opposite the bed's side, letting light in away from the headboard.
-  const windowPosition: [number, number, number] = [roomWidth / 2 - 0.03, roomHeight / 2, roomDepth * 0.1]
+  // Centered within the wall's 6" thickness.
+  const windowPosition: [number, number, number] = [roomWidth / 2, roomHeight / 2, roomDepth * 0.1]
 
   // Start the camera inside the room, near the corner opposite the bed, looking toward it.
   const insideCameraPosition: [number, number, number] = [roomWidth / 2 - 1, EYE_HEIGHT, roomDepth / 2 - 1]
