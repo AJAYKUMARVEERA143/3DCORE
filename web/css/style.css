@@ -1186,6 +1186,12 @@ input[type="range"]::-webkit-slider-thumb:hover { background: var(--b-blue-activ
   border-radius: 4px;
   cursor: pointer;
 }
+#present-bar button:disabled,
+#enter-vr-btn:disabled,
+#enter-ar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 #present-slide-label { font-size: 11px; color: #ccc; min-width: 64px; }
 
 body.present-mode .blender-top-header,

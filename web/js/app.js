@@ -180,6 +180,7 @@ function initApp() {
     renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
     renderer.toneMapping       = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
+    if (renderer.xr) renderer.xr.enabled = true;
 
     // Post-processing (SSAO + Bloom) — off by default, real GPU cost, so
     // this stays purely opt-in (Render tab checkboxes) rather than always-on,
@@ -319,6 +320,7 @@ function initApp() {
     const qSel = document.getElementById('quality-select');
     if (qSel) qSel.value = renderQualityName;
     applyRenderQuality(renderQualityName);
+    refreshXRButtons();
     document.addEventListener('visibilitychange', markSceneDirty);
     if (renderer && renderer.domElement) {
         renderer.domElement.addEventListener('pointerdown', markSceneDirty);
@@ -330,11 +332,22 @@ function initApp() {
 // RENDER LOOP
 // ─────────────────────────────────────────────────────────────
 let _lastFrameTime = performance.now();
+let xrAnimating = false;
 function renderLoop() {
-    requestAnimationFrame(renderLoop);
+    if (!xrAnimating) requestAnimationFrame(renderLoop);
+    if (xrAnimating) return;
+    renderTick(false);
+}
+function renderTick(fromXR) {
     const now = performance.now();
     const dt = Math.min((now - _lastFrameTime) / 1000, 0.1); // clamp so a tab-switch stall doesn't teleport the walk camera
     _lastFrameTime = now;
+
+    if (fromXR) {
+        syncSectionPlane();
+        renderer.render(scene, camera);
+        return;
+    }
 
     orbitControls.update();
     updateSelectionOutline(); // cheap no-op unless selection/geometry actually changed since last frame
@@ -1589,36 +1602,19 @@ function updateWallPreview(cursorPt) {
     sketchPreviewObj = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x4da6ff }));
     scene.add(sketchPreviewObj);
 }
-function finishWall() {
-    if (!sketchState || sketchState.tool !== 'wall' || sketchState.points.length < 2) { cancelSketchTool(); return; }
-    const pts = sketchState.points;
-    clearSketchPreview();
+function createWallMeshesFromPoints(pts) {
+    if (!pts || pts.length < 2) return [];
     const half = wallSettings.thickness / 2;
-    // Each segment of the drawn path becomes its own real scene object
-    // ("WallLayer", "WallLayer.001", ...) instead of one merged mesh — so
-    // every stretch of wall is independently selectable, movable, and
-    // deletable, matching how the rest of the app's objects behave.
     const createdMeshes = [];
     for (let i = 0; i < pts.length - 1; i++) {
         const p0 = pts[i].clone(), p1 = pts[i + 1].clone();
-        const dir = new THREE.Vector3().subVectors(p1, p0).normalize();
-        // Each segment is a box spanning exactly point-to-point along its own
-        // centerline. At an interior joint two such boxes only touch along a
-        // single cross-section line, leaving a wedge-shaped gap between their
-        // outer/inner edges wherever the path turns ("wall center numchi line
-        // numche fill avtundi" — the corner doesn't fill because only the
-        // centerline actually connects). Extend each endpoint that is shared
-        // with a neighboring segment outward by half the wall thickness along
-        // its own direction so the two segments overlap through the corner
-        // and the join comes out solid, regardless of the turn angle.
+        const dir = new THREE.Vector3().subVectors(p1, p0);
+        if (dir.lengthSq() < 1e-12) continue;
+        dir.normalize();
         if (i > 0) p0.addScaledVector(dir, -half);
         if (i < pts.length - 2) p1.addScaledVector(dir, half);
         const seg = buildWallSegmentMesh(p0, p1, wallSettings.thickness, wallSettings.height);
         if (!seg) continue;
-        // Bake the segment's local transform into real world-space geometry
-        // (it was only ever meant to be read via .matrix for a merge before;
-        // now it's a standalone tracked object and needs a clean identity
-        // transform like every other committed mesh in this app).
         seg.geometry.applyMatrix4(seg.matrix);
         seg.position.set(0, 0, 0);
         seg.rotation.set(0, 0, 0);
@@ -1628,9 +1624,10 @@ function finishWall() {
         seg.name = nextBatchName('WallLayer', createdMeshes.map(m => m.name));
         createdMeshes.push(seg);
     }
-    sketchState = null;
-    if (createdMeshes.length === 0) return;
-
+    return createdMeshes;
+}
+function commitWallMeshes(createdMeshes, statusLabel) {
+    if (!createdMeshes.length) return;
     const addAll = () => {
         createdMeshes.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); });
         renderOutliner();
@@ -1641,7 +1638,15 @@ function finishWall() {
         undo() { createdMeshes.forEach(m => removeSceneObject(m)); },
         redo() { addAll(); selectObject(createdMeshes[createdMeshes.length - 1]); },
     });
-    setVCB('Wall:', `${createdMeshes.length} layer(s) — ${formatLength(wallSettings.thickness)} thick, ${formatLength(wallSettings.height)} tall`);
+    if (statusLabel) setVCB('Wall:', statusLabel);
+}
+function finishWall() {
+    if (!sketchState || sketchState.tool !== 'wall' || sketchState.points.length < 2) { cancelSketchTool(); return; }
+    const pts = sketchState.points;
+    clearSketchPreview();
+    sketchState = null;
+    const createdMeshes = createWallMeshesFromPoints(pts);
+    commitWallMeshes(createdMeshes, `${createdMeshes.length} layer(s) — ${formatLength(wallSettings.thickness)} thick, ${formatLength(wallSettings.height)} tall`);
 }
 
 // --- Slab/Floor: click 3+ corners, double-click/Enter to finish -> one real extruded slab mesh ---
@@ -4721,6 +4726,11 @@ const CAD_COMMANDS = {
     OPEN: () => triggerOpenProjectFile(),
     EXPORT: () => exportGLB(),
     IMPORT: () => triggerImportGLB(),
+    IMPORTOBJ: () => triggerImportOBJ(), EXPORTOBJ: () => exportOBJ(),
+    IMPORTSTL: () => triggerImportSTL(), EXPORTSTL: () => exportSTL(),
+    IMPORTDXF: () => triggerImportDXF(), DXF: () => triggerImportDXF(),
+    VR: () => enterVR(), ENTERVR: () => enterVR(),
+    AR: () => enterAR(), ENTERAR: () => enterAR(),
     ASSETS: () => openAssetLibrary(), LIBRARY: () => openAssetLibrary(),
 
     PRESENT: () => enterPresentMode(), PRES: () => enterPresentMode(),
@@ -8712,6 +8722,286 @@ function handleImportGLBFile(evt) {
     reader.readAsArrayBuffer(file);
 }
 
+function collectExportMeshSnapshots() {
+    const snaps = [];
+    sceneObjects.filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh).forEach(o => {
+        const geo = o.mesh.geometry.clone();
+        o.mesh.updateMatrixWorld(true);
+        geo.applyMatrix4(o.mesh.matrixWorld);
+        if (!geo.attributes.position) return;
+        const positions = Array.from(geo.attributes.position.array);
+        const indices = geo.index ? Array.from(geo.index.array) : null;
+        snaps.push({ name: o.name || 'Mesh', positions, indices });
+    });
+    return snaps;
+}
+
+function meshesFromSnapshots(parsed, baseName) {
+    const objects = (parsed && parsed.objects) || [];
+    const imported = [];
+    objects.forEach((obj, i) => {
+        if (!obj.positions || obj.positions.length < 9) return;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(obj.positions), 3));
+        if (obj.indices && obj.indices.length) geo.setIndex(obj.indices);
+        geo.computeVertexNormals();
+        const mat = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, roughness: 0.55, metalness: 0.05 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.name = obj.name || (baseName + (objects.length > 1 ? `.${i}` : ''));
+        imported.push(mesh);
+    });
+    return imported;
+}
+
+function triggerImportOBJ() {
+    const input = document.getElementById('file-import-obj');
+    if (input) input.click();
+}
+function triggerImportSTL() {
+    const input = document.getElementById('file-import-stl');
+    if (input) input.click();
+}
+function triggerImportDXF() {
+    const input = document.getElementById('file-import-dxf');
+    if (input) input.click();
+}
+
+function handleImportOBJFile(evt) {
+    const file = evt.target.files && evt.target.files[0];
+    evt.target.value = '';
+    if (!file) return;
+    const IO = window.FormatIO;
+    if (!IO) { alert('OBJ parser failed to load.'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            const parsed = IO.parseOBJ(e.target.result);
+            const imported = meshesFromSnapshots(parsed, file.name.replace(/\.obj$/i, ''));
+            commitImportedMeshes(imported, file.name.replace(/\.obj$/i, ''));
+            if (imported.length) setVCB('Imported:', `${file.name} (${imported.length} mesh${imported.length > 1 ? 'es' : ''})`);
+        } catch (err) {
+            alert('OBJ import failed: ' + (err && err.message ? err.message : err));
+        }
+    };
+    reader.onerror = () => alert('Could not read file: ' + file.name);
+    reader.readAsText(file);
+}
+
+function handleImportSTLFile(evt) {
+    const file = evt.target.files && evt.target.files[0];
+    evt.target.value = '';
+    if (!file) return;
+    const IO = window.FormatIO;
+    if (!IO) { alert('STL parser failed to load.'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            const parsed = IO.parseSTL(e.target.result);
+            const imported = meshesFromSnapshots(parsed, file.name.replace(/\.stl$/i, ''));
+            commitImportedMeshes(imported, file.name.replace(/\.stl$/i, ''));
+            if (imported.length) setVCB('Imported:', `${file.name} (${imported.length} mesh${imported.length > 1 ? 'es' : ''})`);
+        } catch (err) {
+            alert('STL import failed: ' + (err && err.message ? err.message : err));
+        }
+    };
+    reader.onerror = () => alert('Could not read file: ' + file.name);
+    reader.readAsArrayBuffer(file);
+}
+
+function handleImportDXFFile(evt) {
+    const file = evt.target.files && evt.target.files[0];
+    evt.target.value = '';
+    if (!file) return;
+    const IO = window.FormatIO;
+    if (!IO) { alert('DXF parser failed to load.'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            const parsed = IO.parseDXF(e.target.result);
+            const paths = [];
+            (parsed.lines || []).forEach(ln => {
+                paths.push([
+                    new THREE.Vector3(ln.x1, ln.y1, 0),
+                    new THREE.Vector3(ln.x2, ln.y2, 0),
+                ]);
+            });
+            (parsed.polylines || []).forEach(pl => {
+                const pts = pl.points.map(p => new THREE.Vector3(p.x, p.y, 0));
+                if (pl.closed && pts.length >= 2) pts.push(pts[0].clone());
+                if (pts.length >= 2) paths.push(pts);
+            });
+            if (!paths.length) {
+                alert('DXF had no LINE or LWPOLYLINE entities. Binary DWG is not supported.');
+                return;
+            }
+            const created = [];
+            paths.forEach(pts => created.push(...createWallMeshesFromPoints(pts)));
+            if (!created.length) { alert('DXF lines were too short to make walls.'); return; }
+            commitWallMeshes(created, `DXF → ${created.length} wall layer(s) from ${paths.length} path(s)`);
+            setVCB('Imported:', `${file.name} — ASCII DXF walls (not full CAD)`);
+        } catch (err) {
+            alert('DXF import failed: ' + (err && err.message ? err.message : err));
+        }
+    };
+    reader.onerror = () => alert('Could not read file: ' + file.name);
+    reader.readAsText(file);
+}
+
+function exportOBJ() {
+    const IO = window.FormatIO;
+    if (!IO) { alert('OBJ exporter failed to load.'); return; }
+    const snaps = collectExportMeshSnapshots();
+    if (!snaps.length) { alert('Nothing to export — add a mesh object first.'); return; }
+    const text = IO.serializeOBJ(snaps);
+    downloadBlob(new Blob([text], { type: 'text/plain' }), '3DCore_Project.obj');
+    setVCB('Exported:', '3DCore_Project.obj');
+}
+
+function exportSTL() {
+    const IO = window.FormatIO;
+    if (!IO) { alert('STL exporter failed to load.'); return; }
+    const snaps = collectExportMeshSnapshots();
+    if (!snaps.length) { alert('Nothing to export — add a mesh object first.'); return; }
+    const text = IO.serializeSTLAscii(snaps, '3DCore');
+    downloadBlob(new Blob([text], { type: 'model/stl' }), '3DCore_Project.stl');
+    setVCB('Exported:', '3DCore_Project.stl');
+}
+
+let xrWorldScale = 1;
+let xrActiveSession = null;
+
+function setXRWorldScale(value) {
+    const n = parseFloat(value);
+    xrWorldScale = (n > 0 && isFinite(n)) ? n : 1;
+    const a = document.getElementById('xr-scale-select');
+    const b = document.getElementById('present-xr-scale');
+    if (a && String(a.value) !== String(xrWorldScale)) a.value = String(xrWorldScale);
+    if (b && String(b.value) !== String(xrWorldScale)) b.value = String(xrWorldScale);
+    if (renderer && renderer.xr && renderer.xr.isPresenting) {
+        scene.scale.setScalar(xrWorldScale);
+        markSceneDirty();
+    }
+}
+
+function applyXRScenePose(on) {
+    if (!scene) return;
+    if (on) {
+        scene.rotation.x = -Math.PI / 2;
+        scene.scale.setScalar(xrWorldScale);
+    } else {
+        scene.rotation.x = 0;
+        scene.scale.set(1, 1, 1);
+    }
+}
+
+function setXRButtonEnabled(id, enabled, reason) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !enabled;
+    if (reason) el.title = reason;
+    else el.removeAttribute('title');
+}
+
+async function refreshXRButtons() {
+    const ids = ['enter-vr-btn', 'enter-ar-btn', 'present-vr-btn', 'present-ar-btn'];
+    const secure = typeof window.isSecureContext === 'undefined' ? true : window.isSecureContext;
+    if (!navigator.xr) {
+        ids.forEach(id => setXRButtonEnabled(id, false, 'WebXR is not in this browser. Use Chrome, Edge, or Quest Browser.'));
+        return;
+    }
+    if (!secure) {
+        ids.forEach(id => setXRButtonEnabled(id, false, 'WebXR needs HTTPS or localhost (http://127.0.0.1).'));
+        return;
+    }
+    let vrOk = false, arOk = false;
+    try { vrOk = await navigator.xr.isSessionSupported('immersive-vr'); } catch (e) { vrOk = false; }
+    try { arOk = await navigator.xr.isSessionSupported('immersive-ar'); } catch (e) { arOk = false; }
+    setXRButtonEnabled('enter-vr-btn', vrOk, vrOk ? 'Walk the model in a headset (WebXR).' : 'This device has no immersive VR session.');
+    setXRButtonEnabled('present-vr-btn', vrOk, vrOk ? 'Walk the model in a headset (WebXR).' : 'This device has no immersive VR session.');
+    setXRButtonEnabled('enter-ar-btn', true, arOk ? 'Place with WebXR AR.' : 'AR session not supported — will export GLB for a phone viewer.');
+    setXRButtonEnabled('present-ar-btn', true, arOk ? 'Place with WebXR AR.' : 'AR session not supported — will export GLB for a phone viewer.');
+}
+
+function endXRSessionCleanup() {
+    xrAnimating = false;
+    xrActiveSession = null;
+    applyXRScenePose(false);
+    if (orbitControls) orbitControls.enabled = true;
+    if (renderer && renderer.setAnimationLoop) renderer.setAnimationLoop(null);
+    requestAnimationFrame(renderLoop);
+    markSceneDirty();
+    setVCB('XR:', 'Session ended');
+    refreshXRButtons();
+}
+
+async function startXRSession(session, kind) {
+    if (!renderer.xr || !renderer.xr.setSession) {
+        alert('This Three.js build has no WebXR manager.');
+        return;
+    }
+    xrActiveSession = session;
+    applyXRScenePose(true);
+    if (orbitControls) orbitControls.enabled = false;
+    if (transformControls) transformControls.detach();
+    xrAnimating = true;
+    renderer.setAnimationLoop(() => renderTick(true));
+    session.addEventListener('end', endXRSessionCleanup);
+    const maybePromise = renderer.xr.setSession(session);
+    if (maybePromise && typeof maybePromise.then === 'function') await maybePromise;
+    setVCB(kind === 'ar' ? 'AR:' : 'VR:', kind === 'ar'
+        ? 'Immersive AR session'
+        : 'Immersive VR session — 1 scene meter = 1 real meter at scale 1:1');
+}
+
+async function enterVR() {
+    if (!navigator.xr) {
+        setVCB('VR:', 'WebXR missing — Chrome/Edge/Quest Browser on HTTPS or localhost');
+        return;
+    }
+    let supported = false;
+    try { supported = await navigator.xr.isSessionSupported('immersive-vr'); } catch (e) { supported = false; }
+    if (!supported) {
+        setVCB('VR:', 'No immersive VR on this device/browser');
+        return;
+    }
+    try {
+        let session;
+        try {
+            session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
+        } catch (e) {
+            session = await navigator.xr.requestSession('immersive-vr');
+        }
+        await startXRSession(session, 'vr');
+    } catch (err) {
+        endXRSessionCleanup();
+        setVCB('VR:', err && err.message ? err.message : 'Could not start VR');
+    }
+}
+
+async function enterAR() {
+    if (navigator.xr) {
+        let supported = false;
+        try { supported = await navigator.xr.isSessionSupported('immersive-ar'); } catch (e) { supported = false; }
+        if (supported) {
+            try {
+                let session;
+                try {
+                    session = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['hit-test'] });
+                } catch (e) {
+                    session = await navigator.xr.requestSession('immersive-ar');
+                }
+                await startXRSession(session, 'ar');
+                return;
+            } catch (err) {
+                endXRSessionCleanup();
+                setVCB('AR:', err && err.message ? err.message : 'AR session failed');
+            }
+        }
+    }
+    setVCB('AR:', 'No immersive AR here. Exporting GLB for a phone AR viewer. USDZ encoder is not in this app.');
+    exportGLB();
+}
+
 // ─────────────────────────────────────────────────────────────
 // ASSET LIBRARY — browses real, already-downloaded 3D models (the
 // TexVerse-1K GLB dataset, sourced from Hugging Face — see server.py's
@@ -9740,6 +10030,7 @@ function showKeyboardShortcuts() {
             <b>Shift+D</b><span>Duplicate</span>
             <b>F5</b><span>Present mode (fullscreen client view)</span>
             <b>F10 / Ctrl+Shift+S</b><span>Screenshot current view (PNG)</span>
+            <b>VR / AR commands</b><span>ENTERVR / ENTERAR (headset or GLB fallback)</span>
             <b>F12</b><span>Render (Rendered shading)</span>
             <b>Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y</b><span>Undo / Redo</span>
             <b>Ctrl+S / Ctrl+O</b><span>Save / Open Project</span>
@@ -9788,6 +10079,22 @@ function openHelpDesk() {
         </ul>
 
         <b>Scale handles</b> — with the Scale tool active, drag a corner cube to resize uniformly (the opposite corner stays pinned), or drag a smaller face-center dot to resize along just that one axis.
+
+        <b>Files</b>
+        <ul style="margin:4px 0 10px 16px; padding:0;">
+            <li><b>GLB</b> — full scene round-trip (meshes + materials).</li>
+            <li><b>OBJ / STL</b> — triangle meshes. STL is geometry only (3D print). These read and write real bytes from your file.</li>
+            <li><b>DXF</b> — ASCII LINE and LWPOLYLINE only, turned into wall layers. Not DWG, and not a full CAD kernel.</li>
+            <li>FBX / SKP / IFC / USDZ are <b>not</b> in the menu because this app does not decode them yet.</li>
+        </ul>
+
+        <b>VR / AR</b>
+        <ul style="margin:4px 0 10px 16px; padding:0;">
+            <li><b>Enter VR</b> starts a WebXR <code>immersive-vr</code> session when the browser reports one (Quest Browser, Chrome on a compatible headset). The scene is rotated from Z-up to Y-up for the headset. Scale 1:1 / 1:10 / 1:50 is in the Output panel.</li>
+            <li>If VR is unavailable the button stays disabled — it does not fake a headset view.</li>
+            <li><b>Place in AR</b> uses WebXR <code>immersive-ar</code> when the phone supports it. Otherwise it exports a GLB for a phone AR viewer. There is no USDZ encoder and no webcam “fake AR”.</li>
+            <li>WebXR needs HTTPS or <code>http://127.0.0.1</code>.</li>
+        </ul>
 
         <b>Keyframe animation</b> — select an object, move the Timeline playhead to a frame, click Insert Keyframe, move/rotate/scale the object, advance the playhead to a different frame, Insert Keyframe again. Position, rotation, and scale all interpolate smoothly between keyframes on Play.
 

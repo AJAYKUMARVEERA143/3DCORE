@@ -147,5 +147,58 @@ console.log('ok');
         self.assertIn("takeViewportScreenshot()", html)
 
 
+class FormatIOTests(unittest.TestCase):
+    def test_obj_stl_dxf_roundtrip_via_node(self):
+        import subprocess
+        script = r"""
+const IO = require('./web/js/format_io.js');
+const obj = 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n';
+const parsed = IO.parseOBJ(obj);
+if (!parsed.objects.length) process.exit(2);
+if (parsed.objects[0].positions.length !== 9) process.exit(3);
+const outObj = IO.serializeOBJ(parsed.objects);
+const reparsed = IO.parseOBJ(outObj);
+if (reparsed.objects[0].indices.length !== 3) process.exit(4);
+const stl = IO.serializeSTLAscii(parsed.objects, 'Tri');
+if (!/facet normal/.test(stl)) process.exit(5);
+const fromStl = IO.parseSTL(stl);
+if (fromStl.objects[0].positions.length !== 9) process.exit(6);
+const dxf = [
+  '0','SECTION','2','ENTITIES',
+  '0','LINE','10','0','20','0','11','2','21','0',
+  '0','LWPOLYLINE','70','1','10','0','20','0','10','1','20','0','10','1','20','1',
+  '0','ENDSEC','0','EOF'
+].join('\n');
+const cad = IO.parseDXF(dxf);
+if (cad.lines.length !== 1) process.exit(7);
+if (Math.abs(cad.lines[0].x2 - 2) > 1e-9) process.exit(8);
+if (cad.polylines.length !== 1 || cad.polylines[0].points.length !== 3) process.exit(9);
+if (!cad.polylines[0].closed) process.exit(10);
+console.log('ok');
+"""
+        proc = subprocess.run(
+            ["node", "-e", script],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ok", proc.stdout)
+
+    def test_io_xr_hooks_in_app(self):
+        js = (ROOT / "web" / "js" / "app.js").read_text()
+        html = (ROOT / "web" / "index.html").read_text()
+        self.assertIn("function exportOBJ", js)
+        self.assertIn("function exportSTL", js)
+        self.assertIn("function enterVR", js)
+        self.assertIn("function enterAR", js)
+        self.assertIn("js/format_io.js", html)
+        self.assertIn('id="file-import-obj"', html)
+        self.assertIn("immersive-vr", js)
+        self.assertNotIn("Import FBX", html)
+        self.assertNotIn("Export USDZ", html)
+
+
 if __name__ == "__main__":
     unittest.main()

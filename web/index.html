@@ -42,7 +42,15 @@
         <div class="top-menu-dropdown-item" onclick="loadProjectFromBrowser()">Quick Load (browser) <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="triggerImportGLB()">Import GLB… <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="triggerImportOBJ()">Import OBJ… <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="triggerImportSTL()">Import STL… <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="triggerImportDXF()">Import DXF (ASCII walls)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportGLB()">Export GLB <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exportOBJ()">Export OBJ <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exportSTL()">Export STL <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-sep"></div>
+        <div class="top-menu-dropdown-item" onclick="enterVR()">Enter VR <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="enterAR()">Place in AR <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="togglePresentMode()">Present Mode <span class="kbd">F5</span></div>
         <div class="top-menu-dropdown-item" onclick="takeViewportScreenshot()">Screenshot <span class="kbd">F10</span></div>
@@ -75,6 +83,9 @@
     </div>
     <input type="file" id="file-open-project" accept=".json,.3dcore.json" style="display:none" onchange="handleOpenProjectFile(event)">
     <input type="file" id="file-import-glb" accept=".glb,.gltf" style="display:none" onchange="handleImportGLBFile(event)">
+    <input type="file" id="file-import-obj" accept=".obj" style="display:none" onchange="handleImportOBJFile(event)">
+    <input type="file" id="file-import-stl" accept=".stl" style="display:none" onchange="handleImportSTLFile(event)">
+    <input type="file" id="file-import-dxf" accept=".dxf" style="display:none" onchange="handleImportDXFFile(event)">
 
     <!-- Workspace Tabs Strip -->
     <div class="workspace-tabs-strip">
@@ -861,6 +872,16 @@
                   <option value="4">4× (best still)</option>
                 </select>
               </div>
+              <div class="prop-numeric-row" style="margin-bottom:8px;">
+                <span class="prop-label">XR scale</span>
+                <select id="xr-scale-select" style="flex:1; font-size:10px;" onchange="setXRWorldScale(this.value)">
+                  <option value="1" selected>1:1 (meters)</option>
+                  <option value="0.1">1:10</option>
+                  <option value="0.02">1:50</option>
+                </select>
+              </div>
+              <button id="enter-vr-btn" onclick="enterVR()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Enter VR</button>
+              <button id="enter-ar-btn" onclick="enterAR()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Place in AR</button>
               <button onclick="takeViewportScreenshot()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Screenshot View (F10)</button>
               <button onclick="renderStillImage()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Render Image</button>
               <button onclick="renderAnimationVideo()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Animation (Video)</button>
@@ -1009,9 +1030,17 @@
   <button type="button" onclick="exportPresentSlidePng()">PNG</button>
   <button type="button" onclick="exportAllPresentSlides()">All PNG</button>
   <button type="button" onclick="exportPresentPathVideo()">Path Video</button>
+  <select id="present-xr-scale" onchange="setXRWorldScale(this.value)" title="VR/AR world scale">
+    <option value="1" selected>1:1</option>
+    <option value="0.1">1:10</option>
+    <option value="0.02">1:50</option>
+  </select>
+  <button type="button" id="present-vr-btn" onclick="enterVR()">VR</button>
+  <button type="button" id="present-ar-btn" onclick="enterAR()">AR</button>
   <button type="button" onclick="exitPresentMode()">Exit (Esc)</button>
 </div>
 <script src="js/render_adapter.js"></script>
+<script src="js/format_io.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
