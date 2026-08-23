@@ -40,5 +40,8 @@ class App3DCore:
         print("\n[Status] All 5 Phases Operating Successfully!")
 
 if __name__ == "__main__":
+    print("NOTE: main.py is a print-only demo. It is NOT 3D Core Studio.")
+    print("Start the real app with:  python3 server.py   (then open http://127.0.0.1:8000)")
+    print()
     app = App3DCore()
     app.run_demo()

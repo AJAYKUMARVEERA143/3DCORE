@@ -169,6 +169,10 @@ Do not estimate calendar time. Order is dependency-based.
 
 Wave A is small and should land before any large feature PR.
 
+**Rendering / VR / AR** is planned separately in `docs/RENDER_XR_PLAN.md` (Draft/Balanced/Present GPU ladder, WebXR VR, ARCore + iOS Quick Look). That plan does **not** add a second native engine.
+
+**User-facing flow** (Present mode, stills/video/VR/AR, import/export): `docs/PRODUCT_FLOW.md`.
+
 ---
 
 ## 7. Explicitly out of scope (do not build)

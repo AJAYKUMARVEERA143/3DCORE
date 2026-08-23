@@ -337,6 +337,8 @@ class StudioHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self._serve_static(os.path.join(WEB_DIR, 'css', 'style.css'), 'text/css')
         elif path == '/js/app.js':
             self._serve_static(os.path.join(WEB_DIR, 'js', 'app.js'), 'application/javascript')
+        elif path == '/js/render_adapter.js':
+            self._serve_static(os.path.join(WEB_DIR, 'js', 'render_adapter.js'), 'application/javascript')
 
         # Serve TexVerse GLB files directly
         elif path.startswith('/assets/texverse/') and path.endswith('.glb'):
@@ -384,24 +386,40 @@ class StudioHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         path = self.path
 
         if path == '/api/snap':
-            self._send_json({"status": "SNAPPED", "snapped_points": payload.get('points', [])})
+            self._send_json({
+                "status": "NOT_IMPLEMENTED",
+                "message": "Drawing snap runs in the browser (vertex/edge/axis/grid). This endpoint is a leftover prototype.",
+            }, 501)
 
         elif path == '/api/extrude':
-            self._send_json({"status": "EXTRUDED", "wall_height": payload.get('wall_height', 3.2)})
+            self._send_json({
+                "status": "NOT_IMPLEMENTED",
+                "message": "Extrude/Push-Pull is a client-side mesh op. This endpoint is a leftover prototype.",
+            }, 501)
 
         elif path == '/api/ai-generate':
-            self._send_json({"status": "GENERATED", "prompt": payload.get('prompt', ''), "mesh_id": "AI_Mesh_01"})
+            self._send_json({
+                "status": "NOT_IMPLEMENTED",
+                "message": "Use /api/ai-command with a configured API key. This endpoint never generated a mesh.",
+            }, 501)
 
         elif path == '/api/gpu-render':
-            self._send_json({"status": "RENDERED", "samples": 256, "engine": "Cycles GPU"})
+            self._send_json({
+                "status": "NOT_IMPLEMENTED",
+                "message": "There is no Cycles GPU path. Use in-browser Render Image or the LAN P2P tile pool.",
+            }, 501)
 
         elif path == '/api/boolean':
-            op = payload.get('operation', 'UNION')
-            self._send_json({"status": "SUCCESS", "operation": op})
+            self._send_json({
+                "status": "NOT_IMPLEMENTED",
+                "message": "Booleans run in the browser CSG engine, not on this server.",
+            }, 501)
 
         elif path == '/api/export':
-            fmt = payload.get('format', 'glb')
-            self._send_json({"status": "EXPORT_SUCCESS", "file": f"3DCore_Project.{fmt}"})
+            self._send_json({
+                "status": "NOT_IMPLEMENTED",
+                "message": "Export GLB from File ▸ Export in the client. This endpoint never wrote a file.",
+            }, 501)
 
         elif path == '/api/dreamtex/apply':
             tex_id = payload.get('texture_id', 'dt_concrete_01')

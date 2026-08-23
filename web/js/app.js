@@ -23,6 +23,84 @@ let ssaoEnabled = false, bloomEnabled = false, hdriEnvEnabled = false;
 let selectedObject = null;
 let sceneObjects   = [];
 
+// Grid snap — the header chip used to say "Snap: 3D Grid" with no effect.
+// Increment is in world meters (Z-up). Vertex/edge/axis inference still wins
+// over the grid while drawing (same as SketchUp: inferences beat the grid).
+const GRID_SNAP_STEPS = [0.01, 0.1, 0.25, 0.5, 1, 5];
+let gridSnapOn = true;
+let gridSnapStep = 1;
+let transformSpace = 'world'; // 'world' | 'local'
+let groundGrid = null;
+let axisHelpers = [];
+let renderQualityName = 'balanced';
+let sceneDirty = true;
+let lastGpuDrawMs = 0;
+let lastCamState = null;
+let userShadowPref = true;
+let presentMode = false;
+let presentSlides = [];
+let presentIndex = 0;
+let presentPlaying = false;
+let presentPlayRaf = 0;
+let presentSavedQuality = null;
+let presentLerp = null;
+function markSceneDirty() { sceneDirty = true; }
+
+function snapScalar(n, size) {
+    if (!size) return n;
+    return Math.round(n / size) * size;
+}
+function snapVec3(v, size) {
+    if (!v || !size) return v;
+    v.x = snapScalar(v.x, size);
+    v.y = snapScalar(v.y, size);
+    v.z = snapScalar(v.z, size);
+    return v;
+}
+function formatSnapStep(step) {
+    if (step < 0.1) return step.toFixed(2) + 'm';
+    if (step < 1) return String(step) + 'm';
+    return step + 'm';
+}
+function applyTransformSnapSettings() {
+    if (!transformControls) return;
+    transformControls.setTranslationSnap(gridSnapOn ? gridSnapStep : null);
+    transformControls.setRotationSnap(gridSnapOn ? (15 * Math.PI / 180) : null);
+    transformControls.setScaleSnap(gridSnapOn ? 0.1 : null);
+    transformControls.setSpace(transformSpace);
+}
+function refreshSnapChip() {
+    const chip = document.getElementById('snap-chip');
+    if (chip) {
+        chip.textContent = gridSnapOn ? `🧲 Snap: ${formatSnapStep(gridSnapStep)}` : '🧲 Snap: Off';
+        chip.classList.toggle('chip-off', !gridSnapOn);
+        chip.title = 'Click to toggle grid snap. Shift-click to cycle increment (1cm → 5m).';
+    }
+    const space = document.getElementById('space-chip');
+    if (space) {
+        space.textContent = transformSpace === 'world' ? '🌐 Global' : '📐 Local';
+        space.title = 'Click to toggle transform space (Global / Local).';
+    }
+}
+function toggleGridSnap(ev) {
+    if (ev && ev.shiftKey) {
+        const i = GRID_SNAP_STEPS.indexOf(gridSnapStep);
+        gridSnapStep = GRID_SNAP_STEPS[(i + 1) % GRID_SNAP_STEPS.length];
+        gridSnapOn = true;
+    } else {
+        gridSnapOn = !gridSnapOn;
+    }
+    applyTransformSnapSettings();
+    refreshSnapChip();
+    setVCB('Grid Snap:', gridSnapOn ? formatSnapStep(gridSnapStep) : 'Off');
+}
+function toggleTransformSpace() {
+    transformSpace = transformSpace === 'world' ? 'local' : 'world';
+    applyTransformSnapSettings();
+    refreshSnapChip();
+    setVCB('Transform:', transformSpace === 'world' ? 'Global' : 'Local');
+}
+
 let activeTool           = 'select';
 let currentInteractionMode = 'object';
 let currentShadingMode   = 'MATERIAL';
@@ -121,6 +199,7 @@ function initApp() {
     orbitControls.dampingFactor = 0.08;
     orbitControls.zoomSpeed     = 1.2;
     orbitControls.screenSpacePanning = true;
+    orbitControls.addEventListener('change', markSceneDirty);
 
     // TransformControls — Blender-style gizmo
     transformControls = new THREE.TransformControls(camera, renderer.domElement);
@@ -133,35 +212,66 @@ function initApp() {
         orbitControls.enabled = !e.value;
         if (e.value) {
             // Drag started — capture pre-transform state
+            const extras = [];
+            outlinerMultiSelect.forEach(m => {
+                if (m && m !== selectedObject) {
+                    const mEntry = sceneObjects.find(o => o.mesh === m);
+                    if (mEntry && mEntry.locked) return; // Lock blocks group-drag too, not just a solo drag
+                    extras.push({ mesh: m, position: m.position.clone(), rotation: m.rotation.clone(), scale: m.scale.clone() });
+                }
+            });
             _dragStartState = selectedObject ? {
                 obj: selectedObject,
                 position: selectedObject.position.clone(),
                 rotation: selectedObject.rotation.clone(),
                 scale: selectedObject.scale.clone(),
+                extras,
             } : null;
         } else if (_dragStartState) {
             // Drag ended — push undo command if anything actually changed
             const before = _dragStartState;
             const obj = before.obj;
             const after = { position: obj.position.clone(), rotation: obj.rotation.clone(), scale: obj.scale.clone() };
+            const extraAfter = (before.extras || []).map(x => ({ mesh: x.mesh, position: x.mesh.position.clone(), rotation: x.mesh.rotation.clone(), scale: x.mesh.scale.clone() }));
+            const extrasMoved = extraAfter.some((a, i) => !a.position.equals(before.extras[i].position));
             const changed = !before.position.equals(after.position) ||
                 !before.rotation.equals(after.rotation) ||
-                !before.scale.equals(after.scale);
+                !before.scale.equals(after.scale) || extrasMoved;
             if (changed) {
                 pushUndo({
-                    undo() { obj.position.copy(before.position); obj.rotation.copy(before.rotation); obj.scale.copy(before.scale); if (selectedObject === obj) updateInspectorFromSelected(); },
-                    redo() { obj.position.copy(after.position); obj.rotation.copy(after.rotation); obj.scale.copy(after.scale); if (selectedObject === obj) updateInspectorFromSelected(); },
+                    undo() {
+                        obj.position.copy(before.position); obj.rotation.copy(before.rotation); obj.scale.copy(before.scale);
+                        (before.extras || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        if (selectedObject === obj) updateInspectorFromSelected();
+                    },
+                    redo() {
+                        obj.position.copy(after.position); obj.rotation.copy(after.rotation); obj.scale.copy(after.scale);
+                        extraAfter.forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        if (selectedObject === obj) updateInspectorFromSelected();
+                    },
                 });
             }
             _dragStartState = null;
         }
     });
     scene.add(transformControls);
+    applyTransformSnapSettings();
+    transformControls.addEventListener('objectChange', () => {
+        if (!selectedObject || !_dragStartState) return;
+        if (gridSnapOn && transformControls.getMode() === 'translate') {
+            snapVec3(selectedObject.position, gridSnapStep);
+        }
+        const extras = _dragStartState.extras || [];
+        if (extras.length) {
+            const delta = selectedObject.position.clone().sub(_dragStartState.position);
+            extras.forEach(x => x.mesh.position.copy(x.position).add(delta));
+        }
+    });
 
     // Ground Grid — 30m x 30m, major every 1m (Blender default)
-    const grid = new THREE.GridHelper(30, 30, 0x444444, 0x2a2a2a);
-    grid.rotation.x = Math.PI / 2;   // Z-up
-    scene.add(grid);
+    groundGrid = new THREE.GridHelper(30, 30, 0x444444, 0x2a2a2a);
+    groundGrid.rotation.x = Math.PI / 2;   // Z-up
+    scene.add(groundGrid);
 
     // Red X axis line
     const xLine = new THREE.Line(
@@ -175,6 +285,7 @@ function initApp() {
         new THREE.LineBasicMaterial({ color: 0x44cc44 })
     );
     scene.add(yLine);
+    axisHelpers = [xLine, yLine];
 
     buildDefaultBlenderScene();
 
@@ -205,10 +316,20 @@ function initApp() {
     initDockablePanels();
     initViewCube();
     document.querySelectorAll('.units-quick-select').forEach(el => { el.value = appUnits; });
+    refreshSnapChip();
     tryAutoRestoreSession();
     let showOnStartup = true;
     try { showOnStartup = localStorage.getItem(WELCOME_PREF_KEY) !== '0'; } catch (err) { /* private-mode storage denial — default stays true */ }
     if (showOnStartup) showWelcomeScreen();
+
+    const qSel = document.getElementById('quality-select');
+    if (qSel) qSel.value = renderQualityName;
+    applyRenderQuality(renderQualityName);
+    document.addEventListener('visibilitychange', markSceneDirty);
+    if (renderer && renderer.domElement) {
+        renderer.domElement.addEventListener('pointerdown', markSceneDirty);
+        renderer.domElement.addEventListener('wheel', markSceneDirty, { passive: true });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -234,9 +355,41 @@ function renderLoop() {
         document.getElementById('frame-display').innerText = animFrame;
         applyAnimationAtFrame(animFrame);
         drawDopeSheet();
+        markSceneDirty();
     }
 
-    if (composer && (ssaoEnabled || bloomEnabled)) composer.render();
+    if (presentLerp) {
+        stepPresentLerp(now);
+        markSceneDirty();
+    }
+
+    const RQ = window.RenderQuality;
+    const preset = (RQ && RQ.PRESETS[renderQualityName]) || { fps: 60 };
+    const camState = camera.position.toArray().concat(orbitControls.target.toArray(), [camera.fov]);
+    const cameraMoved = RQ ? RQ.cameraChanged(lastCamState, camState) : true;
+    const walkMoving = !!(typeof walkModeActive !== 'undefined' && walkModeActive && _walkKeysDown && _walkKeysDown.size);
+    const needDraw = RQ
+        ? RQ.shouldRenderFrame({
+            documentHidden: document.hidden,
+            dirty: sceneDirty || !!(transformControls && transformControls.dragging),
+            cameraMoved,
+            animationPlaying: isAnimPlaying,
+            walkMoving,
+            presentPlaying: presentPlaying || !!presentLerp,
+            fpsCap: preset.fps,
+            lastDrawMs: lastGpuDrawMs,
+            nowMs: now,
+        })
+        : true;
+    if (!needDraw) {
+        if (vcRenderer && !presentMode) renderViewCube();
+        return;
+    }
+    lastCamState = camState;
+    lastGpuDrawMs = now;
+    sceneDirty = false;
+
+    if (composer && (ssaoEnabled || bloomEnabled) && !presentMode) composer.render();
     else renderer.render(scene, camera);
 }
 
@@ -247,6 +400,10 @@ function buildDefaultBlenderScene() {
     sceneObjects.forEach(o => scene.remove(o.mesh));
     sceneObjects = [];
     if (transformControls) transformControls.detach();
+    // New Scene used to leave every previous AmbientLight in the graph
+    // (ambient is not tracked in sceneObjects), so each File → New stacked
+    // another 0.35 fill and the default cube got brighter every time.
+    scene.children.filter(c => c.isAmbientLight).forEach(c => scene.remove(c));
 
     // Ambient
     const ambient = new THREE.AmbientLight(0xffffff, 0.35);
@@ -476,8 +633,10 @@ function setupRaycasterSelection(canvas) {
             if (suHits.length > 0 && suHits[0].faceIndex != null) {
                 let obj = suHits[0].object;
                 while (obj && !sceneObjects.some(o => o.mesh === obj)) obj = obj.parent;
+                const faceIndex = suHits[0].faceIndex;
                 if (obj) {
-                    const faceIndex = suHits[0].faceIndex;
+                    if (e.shiftKey) toggleOutlinerMultiSelect(obj, true);
+                    else outlinerMultiSelect.clear();
                     selectObject(obj);
                     ensureNonIndexed(obj);
                     toggleFaceSelection(obj, faceIndex, e.shiftKey);
@@ -504,9 +663,13 @@ function setupRaycasterSelection(canvas) {
                 if (sceneObjects.some(o => o.mesh === obj)) break;
                 obj = obj.parent;
             }
-            if (obj) selectObject(obj);
+            if (obj) {
+                if (e.shiftKey) toggleOutlinerMultiSelect(obj, true);
+                else outlinerMultiSelect.clear();
+                selectObject(obj);
+            }
         } else {
-            selectObject(null);
+            if (!e.shiftKey) { outlinerMultiSelect.clear(); selectObject(null); }
         }
     });
 }
@@ -813,7 +976,21 @@ function sketchPointFromEvent(e, canvas) {
         }
     }
 
+    // Grid snap only when no stronger inference (endpoint/midpoint/axis/tangent)
+    // is active — those already pinned the point and must win.
+    const inferenceWins = _inferenceInfo && ['vertex', 'edge', 'axis', 'tangent'].includes(_inferenceInfo.type);
+    if (gridSnapOn && !inferenceWins) {
+        snapVec3(point, gridSnapStep);
+        if (_inferenceInfo && _inferenceInfo.point) _inferenceInfo.point.copy(point);
+        if (!_inferenceInfo) {
+            _inferenceInfo = { type: 'face', point: point.clone(), label: `Grid ${formatSnapStep(gridSnapStep)}` };
+        } else if (_inferenceInfo.type === 'face') {
+            _inferenceInfo.label = `On Face · Grid ${formatSnapStep(gridSnapStep)}`;
+        }
+    }
+
     updateInferenceGuides(cursorScreen);
+
     _lastSketchCursorPoint = point.clone();
 
     // Live length (+ angle, when available) readout in the VCB while
@@ -2205,7 +2382,7 @@ function setupBoxCircleSelect(canvas) {
         }
 
         const worldPos = new THREE.Vector3();
-        let best = null, bestD = Infinity;
+        const hits = [];
         sceneObjects.forEach(o => {
             if (!o.mesh || o.mesh.name === '_cursor') return;
             o.mesh.getWorldPosition(worldPos);
@@ -2215,11 +2392,15 @@ function setupBoxCircleSelect(canvas) {
             const sy = rect.top + (-proj.y * 0.5 + 0.5) * rect.height;
             if (!test(sx, sy)) return;
             const d = Math.hypot(sx - refPoint.x, sy - refPoint.y);
-            if (d < bestD) { bestD = d; best = o.mesh; }
+            hits.push({ mesh: o.mesh, d });
         });
-
-        selectObject(best);
-        setVCB(activeTool === 'select_box' ? 'Select Box:' : 'Select Circle:', best ? best.name : 'Nothing in region');
+        hits.sort((a, b) => a.d - b.d);
+        if (!e.shiftKey) outlinerMultiSelect.clear();
+        hits.forEach(h => outlinerMultiSelect.add(h.mesh));
+        const best = hits.length ? hits[0].mesh : null;
+        if (best) selectObject(best);
+        else if (!e.shiftKey) selectObject(null);
+        setVCB(activeTool === 'select_box' ? 'Select Box:' : 'Select Circle:', hits.length ? `${hits.length} object(s)` : 'Nothing in region');
         start = null;
         if (suCtx) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
     });
@@ -2964,6 +3145,15 @@ function setupKeyboard() {
         // focus was still sitting in some other field, leaving a Line/
         // Wall/Poly Build path stuck mid-draw with no way to cancel it
         // from the keyboard.
+        if (e.key === 'F10') {
+            e.preventDefault();
+            takeViewportScreenshot();
+            return;
+        }
+        if (e.key === 'Escape' && presentMode && !sketchState) {
+            exitPresentMode();
+            return;
+        }
         if (e.key === 'Escape' && sketchState) {
             if (document.activeElement && document.activeElement !== document.body && typeof document.activeElement.blur === 'function') {
                 document.activeElement.blur();
@@ -3001,6 +3191,7 @@ function setupKeyboard() {
                 return;
             }
             if (k === 'y') { e.preventDefault(); redo(); return; }
+            if (k === 's' && e.shiftKey) { e.preventDefault(); takeViewportScreenshot(); return; }
             if (k === 's') { e.preventDefault(); saveProjectFile(); return; }
             if (k === 'o') { e.preventDefault(); triggerOpenProjectFile(); return; }
             // Ctrl+Numpad — opposite-axis views (Blender convention)
@@ -3111,10 +3302,25 @@ function setupKeyboard() {
             case '3': setViewAngle('right'); break;
             case '5': toggleOrtho();         break;
 
-            // Animation
+            // Animation / Present slideshow
             case ' ':
                 e.preventDefault();
-                togglePlay();
+                if (presentMode) togglePresentPlayback();
+                else togglePlay();
+                break;
+            case 'ArrowRight':
+                if (presentMode) { e.preventDefault(); gotoPresentSlide(presentIndex + 1); }
+                break;
+            case 'ArrowLeft':
+                if (presentMode) { e.preventDefault(); gotoPresentSlide(presentIndex - 1); }
+                break;
+            case 'F5':
+                e.preventDefault();
+                togglePresentMode();
+                break;
+            case 'F10':
+                e.preventDefault();
+                takeViewportScreenshot();
                 break;
             case 'i': case 'I': insertKeyframe(); break;
 
@@ -3178,6 +3384,16 @@ function switchInteractionMode(mode) {
         if (editPills) editPills.style.display = 'none';
         if (hud) hud.innerText = 'User Perspective — Sculpt Mode';
         transformControls.detach();
+    } else if (mode === 'paint') {
+        // There is no texture-paint brush engine. Keep Object Mode behavior
+        // and send the user to the real Materials panel instead of a dead mode.
+        currentInteractionMode = 'object';
+        if (sel) sel.value = 'object';
+        if (editPills) editPills.style.display = 'none';
+        if (hud) hud.innerText = 'User Perspective';
+        if (selectedObject) transformControls.attach(selectedObject);
+        switchRightTab('mat');
+        setVCB('Texture Paint:', 'Not a brush engine — use Materials (per-face paint + image textures).');
     } else {
         if (editPills) editPills.style.display = 'none';
         if (hud) hud.innerText = 'User Perspective';
@@ -3215,10 +3431,14 @@ function setShadingMode(mode) {
 // the renderer flag alone doesn't recompile anything already-rendered, so
 // every material must be flagged for a program rebuild too, or the toggle
 // silently does nothing until something else forces a recompile.
-function toggleShadows(enabled) {
-    renderer.shadowMap.enabled = enabled;
+function toggleShadows(enabled, fromQuality) {
+    if (!fromQuality) userShadowPref = !!enabled;
+    renderer.shadowMap.enabled = !!enabled;
     scene.traverse(obj => { if (obj.isMesh && obj.material) obj.material.needsUpdate = true; });
+    const box = document.getElementById('shadow-toggle-checkbox');
+    if (box && box.checked !== !!enabled) box.checked = !!enabled;
     setVCB('Render:', enabled ? 'Shadows On' : 'Shadows Off');
+    markSceneDirty();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3288,12 +3508,14 @@ function toggleSSAO(enabled) {
     ssaoEnabled = enabled;
     if (ssaoPass) ssaoPass.enabled = enabled;
     setVCB('SSAO:', enabled ? 'On' : 'Off');
+    markSceneDirty();
 }
 
 function toggleBloom(enabled) {
     bloomEnabled = enabled;
     if (bloomPass) bloomPass.enabled = enabled;
     setVCB('Bloom:', enabled ? 'On' : 'Off');
+    markSceneDirty();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3628,19 +3850,83 @@ function triggerDownload(url, filename) {
     document.body.removeChild(a);
 }
 
+function getStillSupersample() {
+    const el = document.getElementById('render-supersample');
+    const n = el ? parseInt(el.value, 10) : 1;
+    return (n === 2 || n === 4) ? n : 1;
+}
+
+function captureStillDataUrl(w, h) {
+    const RQ = window.RenderQuality;
+    const ss = getStillSupersample();
+    const size = RQ ? RQ.downsampleSize(w, h, ss, 8192) : { renderW: w, renderH: h, outW: w, outH: h };
+    let dataUrl = '';
+    withPresentationHelpersHidden(() => {
+        withRenderResolution(size.renderW, size.renderH, () => {
+            renderer.render(scene, camera);
+            if (size.renderW === size.outW && size.renderH === size.outH) {
+                dataUrl = renderer.domElement.toDataURL('image/png');
+                return;
+            }
+            const src = renderer.domElement;
+            const out = document.createElement('canvas');
+            out.width = size.outW;
+            out.height = size.outH;
+            const ctx = out.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(src, 0, 0, size.outW, size.outH);
+            dataUrl = out.toDataURL('image/png');
+        });
+    });
+    return dataUrl;
+}
+
 function renderStillImage() {
     const { w, h } = getRenderResolution();
-    withRenderResolution(w, h, () => {
-        // Must render synchronously right here, immediately before the
-        // capture — this canvas has no preserveDrawingBuffer, so a read
-        // any time after control returns to the event loop can capture a
-        // stale/cleared buffer instead of this frame (bit this project
-        // once already, on the Asset Library thumbnail renderer).
-        renderer.render(scene, camera);
-        const dataUrl = renderer.domElement.toDataURL('image/png');
-        triggerDownload(dataUrl, `3DCore_Render_${w}x${h}.png`);
-    });
+    const dataUrl = captureStillDataUrl(w, h);
+    triggerDownload(dataUrl, `3DCore_Render_${w}x${h}.png`);
     setVCB('Render:', `Image ${w}×${h} rendered`);
+}
+
+// Viewport screenshot — what is on screen now (current camera, quality, canvas
+// size). Distinct from Render Image, which resizes to the Output panel
+// resolution and optional 2×/4× supersample.
+function takeViewportScreenshot() {
+    if (!renderer || !scene || !camera) {
+        setVCB('Screenshot:', 'Viewport is not ready');
+        return;
+    }
+    const canvas = renderer.domElement;
+    let dataUrl = '';
+    withPresentationHelpersHidden(() => {
+        renderer.render(scene, camera);
+        dataUrl = canvas.toDataURL('image/png');
+    });
+    const w = canvas.width;
+    const h = canvas.height;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    triggerDownload(dataUrl, `3DCore_Screenshot_${w}x${h}_${stamp}.png`);
+    copyPngDataUrlToClipboard(dataUrl);
+    flashScreenshot();
+    setVCB('Screenshot:', `${w}×${h} PNG`);
+}
+
+function copyPngDataUrlToClipboard(dataUrl) {
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') return;
+    fetch(dataUrl)
+        .then(r => r.blob())
+        .then(blob => navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]))
+        .catch(() => {});
+}
+
+function flashScreenshot() {
+    const el = document.getElementById('screenshot-flash');
+    if (!el) return;
+    el.classList.remove('is-on');
+    void el.offsetWidth;
+    el.classList.add('is-on');
+    setTimeout(() => el.classList.remove('is-on'), 200);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -4013,6 +4299,38 @@ function frameAllObjects() {
     setVCB('View:', 'Frame All');
 }
 
+function frameSelectedObjects() {
+    const targets = [];
+    if (outlinerMultiSelect.size) outlinerMultiSelect.forEach(m => { if (m) targets.push(m); });
+    else if (selectedObject) targets.push(selectedObject);
+    if (!targets.length) { frameAllObjects(); return; }
+    const box = new THREE.Box3();
+    targets.forEach(m => box.expandByObject(m));
+    const center = new THREE.Vector3(); box.getCenter(center);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z, 1);
+    orbitControls.target.copy(center);
+    const dir = camera.position.clone().sub(orbitControls.target).normalize();
+    camera.position.copy(center).addScaledVector(dir, maxDim * 1.8);
+    orbitControls.update();
+    setVCB('View:', 'Frame Selected');
+}
+
+function selectAllMeshes() {
+    outlinerMultiSelect.clear();
+    sceneObjects.forEach(o => { if (o.mesh) outlinerMultiSelect.add(o.mesh); });
+    const first = sceneObjects.find(o => o.mesh && o.mesh.isMesh);
+    if (first) selectObject(first.mesh);
+    else renderOutliner();
+    setVCB('Select:', `${outlinerMultiSelect.size} object(s)`);
+}
+
+function deselectAllMeshes() {
+    outlinerMultiSelect.clear();
+    selectObject(null);
+    setVCB('Select:', 'None');
+}
+
 // ─────────────────────────────────────────────────────────────
 // VIEWCUBE — AutoCAD/SketchUp-style navigation widget: a real 3D cube
 // (rendered into its own tiny scene/camera, not CSS dots) sitting inside a
@@ -4064,7 +4382,7 @@ function initViewCube() {
     if (!vcCanvas || typeof camera === 'undefined' || !camera) return;
 
     vcRenderer = new THREE.WebGLRenderer({ canvas: vcCanvas, alpha: true, antialias: true });
-    vcRenderer.setPixelRatio(window.devicePixelRatio || 1);
+    vcRenderer.setPixelRatio(1);
     vcRenderer.setSize(vcCanvas.clientWidth || 88, vcCanvas.clientHeight || 88, false);
     vcRenderer.setClearColor(0x000000, 0);
 
@@ -4487,6 +4805,11 @@ const CAD_COMMANDS = {
     IMPORT: () => triggerImportGLB(),
     ASSETS: () => openAssetLibrary(), LIBRARY: () => openAssetLibrary(),
 
+    PRESENT: () => enterPresentMode(), PRES: () => enterPresentMode(),
+    QUALITY: (arg) => applyRenderQuality((arg || 'balanced').toLowerCase()),
+    SLIDE: () => addPresentSlide(),
+    SCREENSHOT: () => takeViewportScreenshot(), SHOT: () => takeViewportScreenshot(), SS: () => takeViewportScreenshot(),
+
     HELP: () => openHelpDesk(), H: () => openHelpDesk(), '?': () => openHelpDesk(),
 };
 
@@ -4552,6 +4875,7 @@ function switchWS(el, ws) {
         anim:     () => { switchInteractionMode('object');   switchRightTab('anim'); },
         shade:    () => { switchInteractionMode('object');   switchRightTab('mat'); },
         render:   () => { switchInteractionMode('object');   switchRightTab('render'); setShadingMode('RAYTRACE'); },
+        present:  () => { enterPresentMode(); },
         bim:      () => { switchInteractionMode('object');   switchRightTab('object'); },
     };
 
@@ -7576,24 +7900,30 @@ function setVCB(label, value) {
 // OBJECT OPS — Duplicate, Delete, New Scene
 // ─────────────────────────────────────────────────────────────
 function duplicateSelected() {
-    if (!selectedObject || !selectedObject.isMesh) return;
-    const clone = selectedObject.clone();
-    clone.material = Array.isArray(selectedObject.material)
-        ? selectedObject.material.map(m => m.clone())
-        : selectedObject.material.clone();
-    clone.geometry = deepCloneGeometry(selectedObject.geometry);
-    clone.position.x += 2.2;
-    clone.name = selectedObject.name + '.001';
-    const type = (sceneObjects.find(o => o.mesh === selectedObject) || {}).type || 'mesh';
-    scene.add(clone);
-    sceneObjects.push({ name: clone.name, type, mesh: clone });
+    const targets = [];
+    if (outlinerMultiSelect.size) outlinerMultiSelect.forEach(m => { if (m && m.isMesh) targets.push(m); });
+    else if (selectedObject && selectedObject.isMesh) targets.push(selectedObject);
+    if (!targets.length) return;
+    const clones = [];
+    targets.forEach(src => {
+        const clone = src.clone();
+        clone.material = Array.isArray(src.material) ? src.material.map(m => m.clone()) : src.material.clone();
+        clone.geometry = deepCloneGeometry(src.geometry);
+        clone.position.x += 2.2;
+        clone.name = src.name + '.001';
+        const type = (sceneObjects.find(o => o.mesh === src) || {}).type || 'mesh';
+        scene.add(clone);
+        sceneObjects.push({ name: clone.name, type, mesh: clone });
+        clones.push(clone);
+    });
+    outlinerMultiSelect.clear();
+    clones.forEach(c => outlinerMultiSelect.add(c));
     renderOutliner();
-    selectObject(clone);
-    setVCB('Duplicate:', clone.name);
-
+    selectObject(clones[clones.length - 1]);
+    setVCB('Duplicate:', clones.length === 1 ? clones[0].name : `${clones.length} objects`);
     pushUndo({
-        undo() { removeSceneObject(clone); },
-        redo() { scene.add(clone); sceneObjects.push({ name: clone.name, type, mesh: clone }); renderOutliner(); selectObject(clone); },
+        undo() { clones.forEach(c => removeSceneObject(c)); },
+        redo() { clones.forEach(c => { const type = 'mesh'; scene.add(c); sceneObjects.push({ name: c.name, type, mesh: c }); }); renderOutliner(); selectObject(clones[clones.length - 1]); },
     });
 }
 
@@ -8078,21 +8408,29 @@ function toggleFaceOrientation() {
 }
 
 function deleteSelected() {
-    if (!selectedObject) return;
-    const mesh = selectedObject;
-    const entry = sceneObjects.find(o => o.mesh === mesh);
-    if (!entry) return;
-    if (entry.locked) { setVCB('Delete:', `${entry.name} is locked — unlock it first`); return; }
-    const type = entry.type;
-    const parent = mesh.parent || scene;
-
-    if (removeSceneObject(mesh)) {
-        setVCB('Deleted:', 'Object removed');
-        pushUndo({
-            undo() { parent.add(mesh); sceneObjects.push({ name: mesh.name, type, mesh }); renderOutliner(); selectObject(mesh); },
-            redo() { removeSceneObject(mesh); },
-        });
+    const targets = [];
+    if (outlinerMultiSelect.size) outlinerMultiSelect.forEach(m => { if (m) targets.push(m); });
+    else if (selectedObject) targets.push(selectedObject);
+    if (!targets.length) return;
+    const records = [];
+    let lockedSkipped = 0;
+    targets.forEach(mesh => {
+        const entry = sceneObjects.find(o => o.mesh === mesh);
+        if (!entry) return;
+        if (entry.locked) { lockedSkipped++; return; } // Lock (see toggleLockSelected()) blocks Delete same as Move/Rotate/Scale
+        records.push({ mesh, type: entry.type, parent: mesh.parent || scene });
+    });
+    if (!records.length) {
+        setVCB('Delete:', lockedSkipped ? `${lockedSkipped} object(s) locked — unlock first` : 'Nothing to delete');
+        return;
     }
+    records.forEach(r => removeSceneObject(r.mesh));
+    outlinerMultiSelect.clear();
+    setVCB('Deleted:', (records.length === 1 ? 'Object removed' : `${records.length} objects removed`) + (lockedSkipped ? ` (${lockedSkipped} locked, skipped)` : ''));
+    pushUndo({
+        undo() { records.forEach(r => { r.parent.add(r.mesh); sceneObjects.push({ name: r.mesh.name, type: r.type, mesh: r.mesh }); }); renderOutliner(); selectObject(records[0].mesh); },
+        redo() { records.forEach(r => removeSceneObject(r.mesh)); },
+    });
 }
 
 // Lock prevents Move/Rotate/Scale (transformControls never attaches to a
@@ -8131,6 +8469,9 @@ function newScene() {
     renderLayersPanel();
     populateLayerSelect();
     sunLight = null; // see ensureSunLight() — buildDefaultBlenderScene() just removed every previous scene object including any Sun
+    presentSlides = [];
+    presentIndex = 0;
+    refreshPresentSlideSelect();
     scheduleAutosave(); // overwrite the autosave slot so a refresh doesn't resurrect the old scene
     setVCB('New Scene', 'Default Blender startup');
 }
@@ -8219,6 +8560,8 @@ function sceneToJSON() {
                 scale: [k.scale.x, k.scale.y, k.scale.z],
             }))])
         ),
+        presentSlides,
+        renderQualityName,
     };
 }
 
@@ -8276,6 +8619,11 @@ function loadSceneFromJSON(data) {
 
     undoStack.length = 0;
     redoStack.length = 0;
+
+    presentSlides = Array.isArray(data.presentSlides) ? data.presentSlides : [];
+    presentIndex = 0;
+    refreshPresentSlideSelect();
+    if (data.renderQualityName) applyRenderQuality(data.renderQualityName);
 
     renderOutliner();
     selectObject(null);
@@ -9804,6 +10152,8 @@ function showKeyboardShortcuts() {
             <b>Space</b><span>Play / Pause</span>
             <b>Numpad 1 / 3 / 7 / 5</b><span>Front / Right / Top / toggle Ortho</span>
             <b>Shift+D</b><span>Duplicate</span>
+            <b>F5</b><span>Present mode (fullscreen client view)</span>
+            <b>F10 / Ctrl+Shift+S</b><span>Screenshot current view (PNG)</span>
             <b>F12</b><span>Render (Rendered shading)</span>
             <b>Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y</b><span>Undo / Redo</span>
             <b>Ctrl+S / Ctrl+O</b><span>Save / Open Project</span>
@@ -9882,5 +10232,322 @@ function showAboutDialog() {
 // MISC HELPERS
 // ─────────────────────────────────────────────────────────────
 function setShadingModeFromDropdown(val) { setShadingMode(val); }
+
+
+// ─────────────────────────────────────────────────────────────
+// QUALITY LADDER + PRESENT MODE
+// Draft / Balanced / Present change real renderer knobs.
+// Present hides modeling chrome, stores camera slides, exports PNG/WebM.
+// ─────────────────────────────────────────────────────────────
+function applyRenderQuality(name) {
+    const RQ = window.RenderQuality;
+    if (!RQ) return;
+    const preset = RQ.PRESETS[name] || RQ.PRESETS.balanced;
+    renderQualityName = preset.id;
+    const dpr = RQ.clampPixelRatio(window.devicePixelRatio || 1, preset.pixelRatioCap);
+    renderer.setPixelRatio(dpr);
+    const smType = RQ.shadowMapConstant(THREE, preset.shadowType);
+    if (smType != null) renderer.shadowMap.type = smType;
+    if (preset.shadows) {
+        toggleShadows(userShadowPref, true);
+        const tier = preset.shadowSize >= 2048 ? 'HIGH' : (preset.shadowSize >= 1024 ? 'MEDIUM' : 'LOW');
+        setShadowQuality(tier);
+        const sq = document.getElementById('shadow-quality-select');
+        if (sq) sq.value = tier;
+    } else {
+        toggleShadows(false, true);
+    }
+    if (preset.id === 'draft') {
+        toggleSSAO(false);
+        toggleBloom(false);
+        toggleHdriEnvironment(false);
+        const ssao = document.getElementById('ssao-toggle');
+        const bloom = document.getElementById('bloom-toggle');
+        const hdri = document.getElementById('hdri-toggle');
+        if (ssao) ssao.checked = false;
+        if (bloom) bloom.checked = false;
+        if (hdri) hdri.checked = false;
+    } else if (preset.id === 'present') {
+        toggleSSAO(true);
+        toggleHdriEnvironment(true);
+        const ssao = document.getElementById('ssao-toggle');
+        const hdri = document.getElementById('hdri-toggle');
+        if (ssao) ssao.checked = true;
+        if (hdri) hdri.checked = true;
+        setShadingMode('RAYTRACE');
+    } else {
+        toggleHdriEnvironment(true);
+        const hdri = document.getElementById('hdri-toggle');
+        if (hdri) hdri.checked = true;
+    }
+    const qSel = document.getElementById('quality-select');
+    if (qSel) qSel.value = preset.id;
+    markSceneDirty();
+    setVCB('Quality:', preset.id.charAt(0).toUpperCase() + preset.id.slice(1));
+}
+
+function withPresentationHelpersHidden(fn) {
+    const gridOn = groundGrid ? groundGrid.visible : true;
+    const axisPrev = axisHelpers.map(h => h.visible);
+    const tcOn = transformControls ? transformControls.visible : true;
+    if (groundGrid) groundGrid.visible = false;
+    axisHelpers.forEach(h => { h.visible = false; });
+    if (transformControls) transformControls.visible = false;
+    try { return fn(); }
+    finally {
+        if (groundGrid) groundGrid.visible = gridOn;
+        axisHelpers.forEach((h, i) => { h.visible = axisPrev[i]; });
+        if (transformControls) transformControls.visible = tcOn;
+        markSceneDirty();
+    }
+}
+
+function capturePresentSlide() {
+    return {
+        name: 'Slide ' + (presentSlides.length + 1),
+        position: camera.position.toArray(),
+        quaternion: camera.quaternion.toArray(),
+        target: orbitControls.target.toArray(),
+        fov: camera.fov,
+    };
+}
+
+function applyPresentSlide(slide, t) {
+    if (!slide) return;
+    const k = t == null ? 1 : t;
+    if (k >= 1) {
+        camera.position.fromArray(slide.position);
+        camera.quaternion.fromArray(slide.quaternion);
+        orbitControls.target.fromArray(slide.target);
+        camera.fov = slide.fov;
+        camera.updateProjectionMatrix();
+        orbitControls.update();
+        markSceneDirty();
+        return;
+    }
+}
+
+function refreshPresentSlideSelect() {
+    const sel = document.getElementById('present-slide-select');
+    const label = document.getElementById('present-slide-label');
+    if (sel) {
+        sel.innerHTML = '';
+        presentSlides.forEach((s, i) => {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = s.name || ('Slide ' + (i + 1));
+            if (i === presentIndex) opt.selected = true;
+            sel.appendChild(opt);
+        });
+        if (!presentSlides.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No slides — Add Slide';
+            sel.appendChild(opt);
+        }
+    }
+    if (label) {
+        label.textContent = presentSlides.length
+            ? ((presentIndex + 1) + ' / ' + presentSlides.length)
+            : 'No slides';
+    }
+}
+
+function addPresentSlide() {
+    presentSlides.push(capturePresentSlide());
+    presentIndex = presentSlides.length - 1;
+    refreshPresentSlideSelect();
+    scheduleAutosave();
+    setVCB('Present:', presentSlides[presentIndex].name + ' saved');
+}
+
+function deletePresentSlide() {
+    if (!presentSlides.length) return;
+    presentSlides.splice(presentIndex, 1);
+    presentIndex = Math.max(0, presentIndex - 1);
+    refreshPresentSlideSelect();
+    scheduleAutosave();
+    setVCB('Present:', 'Slide removed');
+}
+
+function gotoPresentSlide(i, animate) {
+    if (!presentSlides.length) { setVCB('Present:', 'Add a slide first'); return; }
+    const n = presentSlides.length;
+    presentIndex = ((i % n) + n) % n;
+    const slide = presentSlides[presentIndex];
+    if (animate) {
+        presentLerp = {
+            fromPos: camera.position.clone(),
+            fromQuat: camera.quaternion.clone(),
+            fromTarget: orbitControls.target.clone(),
+            fromFov: camera.fov,
+            to: slide,
+            t0: performance.now(),
+            dur: 900,
+        };
+    } else {
+        applyPresentSlide(slide, 1);
+    }
+    refreshPresentSlideSelect();
+    markSceneDirty();
+}
+
+function stepPresentLerp(now) {
+    if (!presentLerp) return;
+    const u = Math.min(1, (now - presentLerp.t0) / presentLerp.dur);
+    const s = u * u * (3 - 2 * u);
+    const to = presentLerp.to;
+    camera.position.lerpVectors(presentLerp.fromPos, new THREE.Vector3().fromArray(to.position), s);
+    const qTo = new THREE.Quaternion().fromArray(to.quaternion);
+    camera.quaternion.copy(presentLerp.fromQuat).slerp(qTo, s);
+    orbitControls.target.lerpVectors(presentLerp.fromTarget, new THREE.Vector3().fromArray(to.target), s);
+    camera.fov = presentLerp.fromFov + (to.fov - presentLerp.fromFov) * s;
+    camera.updateProjectionMatrix();
+    if (u >= 1) presentLerp = null;
+}
+
+function togglePresentPlayback() {
+    if (presentPlaying) {
+        presentPlaying = false;
+        if (presentPlayRaf) cancelAnimationFrame(presentPlayRaf);
+        presentPlayRaf = 0;
+        const btn = document.getElementById('present-play-btn');
+        if (btn) btn.textContent = 'Play';
+        setVCB('Present:', 'Paused');
+        return;
+    }
+    if (presentSlides.length < 2) { setVCB('Present:', 'Need 2+ slides to play'); return; }
+    presentPlaying = true;
+    const btn = document.getElementById('present-play-btn');
+    if (btn) btn.textContent = 'Pause';
+    const tick = () => {
+        if (!presentPlaying) return;
+        if (presentLerp) { presentPlayRaf = requestAnimationFrame(tick); return; }
+        gotoPresentSlide(presentIndex + 1, true);
+        presentPlayRaf = requestAnimationFrame(tick);
+    };
+    gotoPresentSlide(presentIndex, true);
+    presentPlayRaf = requestAnimationFrame(tick);
+}
+
+function setPresentChrome(on) {
+    document.body.classList.toggle('present-mode', on);
+    if (groundGrid) groundGrid.visible = !on;
+    axisHelpers.forEach(h => { h.visible = !on; });
+    if (transformControls) transformControls.visible = !on;
+    if (transformControls && on) transformControls.detach();
+    const bar = document.getElementById('present-bar');
+    if (bar) bar.style.display = on ? 'flex' : 'none';
+    markSceneDirty();
+}
+
+function enterPresentMode() {
+    if (presentMode) return;
+    presentMode = true;
+    presentSavedQuality = renderQualityName;
+    setPresentChrome(true);
+    applyRenderQuality('present');
+    if (!presentSlides.length) addPresentSlide();
+    else gotoPresentSlide(presentIndex, false);
+    setVCB('Present:', 'F5 / Esc to exit — arrows change slides');
+}
+
+function exitPresentMode() {
+    if (!presentMode) return;
+    presentMode = false;
+    presentPlaying = false;
+    presentLerp = null;
+    if (presentPlayRaf) cancelAnimationFrame(presentPlayRaf);
+    presentPlayRaf = 0;
+    setPresentChrome(false);
+    applyRenderQuality(presentSavedQuality || 'balanced');
+    if (selectedObject) transformControls.attach(selectedObject);
+    setVCB('Present:', 'Exited');
+}
+
+function togglePresentMode() {
+    if (presentMode) exitPresentMode();
+    else enterPresentMode();
+}
+
+async function exportPresentSlidePng() {
+    if (!presentSlides.length) addPresentSlide();
+    applyPresentSlide(presentSlides[presentIndex], 1);
+    const { w, h } = getRenderResolution();
+    const dataUrl = captureStillDataUrl(w, h);
+    triggerDownload(dataUrl, `3DCore_Slide_${presentIndex + 1}_${w}x${h}.png`);
+    setVCB('Present:', 'Slide PNG exported');
+}
+
+async function exportAllPresentSlides() {
+    if (!presentSlides.length) { setVCB('Present:', 'No slides'); return; }
+    const { w, h } = getRenderResolution();
+    for (let i = 0; i < presentSlides.length; i++) {
+        presentIndex = i;
+        applyPresentSlide(presentSlides[i], 1);
+        const dataUrl = captureStillDataUrl(w, h);
+        triggerDownload(dataUrl, `3DCore_Slide_${i + 1}_${w}x${h}.png`);
+        await new Promise(r => setTimeout(r, 250));
+    }
+    refreshPresentSlideSelect();
+    setVCB('Present:', presentSlides.length + ' slide PNG(s) exported');
+}
+
+async function exportPresentPathVideo() {
+    if (presentSlides.length < 2) { setVCB('Present:', 'Need 2+ slides for a path video'); return; }
+    if (typeof MediaRecorder === 'undefined') { setVCB('Present:', 'MediaRecorder not available'); return; }
+    const { w, h } = getRenderResolution();
+    const fps = 24;
+    const framesPerLeg = 24;
+    const prevPR = renderer.getPixelRatio();
+    const prevW = renderer.domElement.width, prevH = renderer.domElement.height;
+    const prevAspect = camera.aspect;
+    renderer.setPixelRatio(1);
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    const stream = renderer.domElement.captureStream(fps);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6 });
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    const stopped = new Promise(res => { rec.onstop = res; });
+    rec.start();
+    withPresentationHelpersHidden(() => {});
+    const gridOn = groundGrid ? groundGrid.visible : true;
+    if (groundGrid) groundGrid.visible = false;
+    axisHelpers.forEach(h => { h.visible = false; });
+    for (let s = 0; s < presentSlides.length - 1; s++) {
+        const a = presentSlides[s], b = presentSlides[s + 1];
+        for (let f = 0; f <= framesPerLeg; f++) {
+            const u = f / framesPerLeg;
+            const k = u * u * (3 - 2 * u);
+            camera.position.lerpVectors(new THREE.Vector3().fromArray(a.position), new THREE.Vector3().fromArray(b.position), k);
+            const qa = new THREE.Quaternion().fromArray(a.quaternion);
+            const qb = new THREE.Quaternion().fromArray(b.quaternion);
+            camera.quaternion.copy(qa).slerp(qb, k);
+            orbitControls.target.lerpVectors(new THREE.Vector3().fromArray(a.target), new THREE.Vector3().fromArray(b.target), k);
+            camera.fov = a.fov + (b.fov - a.fov) * k;
+            camera.updateProjectionMatrix();
+            renderer.render(scene, camera);
+            await new Promise(r => setTimeout(r, 1000 / fps));
+        }
+    }
+    rec.stop();
+    await stopped;
+    if (groundGrid) groundGrid.visible = gridOn;
+    axisHelpers.forEach(h => { h.visible = !presentMode; });
+    renderer.setPixelRatio(prevPR);
+    renderer.setSize(prevW, prevH, false);
+    camera.aspect = prevAspect;
+    camera.updateProjectionMatrix();
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    triggerDownload(url, `3DCore_Present_${w}x${h}.webm`);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    markSceneDirty();
+    setVCB('Present:', 'Path video exported');
+}
+
 
 window.onload = initApp;

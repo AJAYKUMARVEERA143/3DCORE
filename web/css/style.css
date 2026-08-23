@@ -322,6 +322,33 @@ input[type="range"]::-webkit-slider-thumb:hover { background: var(--b-blue-activ
   font-size: 10.5px;
 }
 .v-sub-item:hover { background: var(--b-bg-hover); }
+.v-sub-item.has-menu { position: relative; }
+.v-sub-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 160px;
+  background: var(--b-bg-panel);
+  border: 1px solid var(--b-border-light);
+  border-radius: 4px;
+  z-index: 80;
+  padding: 4px 0;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+.v-sub-item.has-menu:hover .v-sub-dropdown { display: block; }
+.hud-chip {
+  background: #151515;
+  border: 1px solid #333;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #aaa;
+  cursor: pointer;
+  font-family: inherit;
+}
+.hud-chip:hover { border-color: var(--b-orange); color: #ddd; }
+.hud-chip.chip-off { opacity: 0.55; text-decoration: line-through; }
 
 /* Shading Spheres */
 .shading-spheres-group {
@@ -1119,6 +1146,62 @@ input[type="range"]::-webkit-slider-thumb:hover { background: var(--b-blue-activ
 
 /* Touch-first compact workspace: keep the viewport and essential controls on
    tablets/phones instead of shrinking a desktop editor into unusable panels. */
+#screenshot-flash {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  background: #fff;
+  opacity: 0;
+}
+#screenshot-flash.is-on {
+  animation: screenshot-pop 0.18s ease-out;
+}
+@keyframes screenshot-pop {
+  0% { opacity: 0.55; }
+  100% { opacity: 0; }
+}
+
+#present-bar {
+  display: none;
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 900;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(20, 20, 20, 0.92);
+  border: 1px solid var(--b-border-light);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+#present-bar button, #present-bar select {
+  font-size: 11px;
+  padding: 4px 8px;
+  background: var(--b-bg-input);
+  border: 1px solid var(--b-border-light);
+  color: #eee;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#present-slide-label { font-size: 11px; color: #ccc; min-width: 64px; }
+
+body.present-mode .blender-top-header,
+body.present-mode .viewport-top-toolbar,
+body.present-mode .sketchup-getting-started-dock,
+body.present-mode #dock-right,
+body.present-mode #dock-left,
+body.present-mode #cad-command-bar,
+body.present-mode .viewcube-wrap,
+body.present-mode .viewport-hud-text,
+body.present-mode .sketchup-measurement-vcb-box {
+  display: none !important;
+}
+body.present-mode #present-bar { display: flex; }
+body.present-mode .blender-main-stage { height: 100vh; }
+
 @media (max-width: 900px) {
   .top-header-right, .viewport-top-toolbar, #dock-right, #dock-left, #dock-top,
   #dock-bottom { display: none; }

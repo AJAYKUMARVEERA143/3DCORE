@@ -3,7 +3,7 @@ import json
 import os
 import shutil
 
-LOCAL_ASSETS = r'd:\3D_Core\assets'
+LOCAL_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets')
 
 def fetch_hf_tree(dataset_id, subpath='', recursive=True):
     url = f'https://huggingface.co/api/datasets/{dataset_id}/tree/main'

@@ -1,0 +1,17 @@
+name: integrity
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile and unit tests
+        run: |
+          python3 -m py_compile server.py main.py download_datasets.py
+          python3 -m unittest tests.test_integrity
+          node --check web/js/app.js
