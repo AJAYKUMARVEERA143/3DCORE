@@ -339,6 +339,8 @@ class StudioHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self._serve_static(os.path.join(WEB_DIR, 'js', 'app.js'), 'application/javascript')
         elif path == '/js/render_adapter.js':
             self._serve_static(os.path.join(WEB_DIR, 'js', 'render_adapter.js'), 'application/javascript')
+        elif path == '/js/format_io.js':
+            self._serve_static(os.path.join(WEB_DIR, 'js', 'format_io.js'), 'application/javascript')
 
         # Serve TexVerse GLB files directly
         elif path.startswith('/assets/texverse/') and path.endswith('.glb'):

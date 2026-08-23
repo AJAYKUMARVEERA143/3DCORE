@@ -196,11 +196,14 @@ Each wave ships a **file or a mode** the user can click. No wave is “research 
 
 | Already in the app | Add next |
 | --- | --- |
-| Draw, mesh, sculpt, BIM walls | Present mode |
-| GLB import/export, `.3dcore.json` | OBJ/STL, then real DXF |
-| PNG still + WebM animation | 2×/4× stills, slide-path video |
-| Lights, IBL, SSAO, P2P tiles | Quality presets + GPU dirty loop |
-| Walk / Look Around | WebXR VR + AR place |
+| Draw, mesh, sculpt, BIM walls | Knife / loop cut / lasso / proportional edit |
+| GLB, OBJ, STL, ASCII DXF walls, `.3dcore.json` | IFC / USD / DWG only if a real WASM decoder exists |
+| PNG still + WebM + viewport screenshot | Client zip pack |
+| Lights, IBL, SSAO, P2P tiles | Path tracing (out of scope) |
+| Present mode + quality ladder | Optional USDZ if an encoder is wired |
+| WebXR VR walk + AR session or GLB fallback | Hit-test placement polish, teleport |
+
+Implementation status (2026-08-23): Waves **P1–P5** and honest **P6/P7 slices** ship in the browser client: quality ladder, Present, 2×/4× stills, screenshot, OBJ/STL I/O, ASCII DXF → walls, WebXR VR, AR session or GLB fallback (`web/js/format_io.js`, `web/js/render_adapter.js`). No FBX/SKP/USDZ buttons. `src/` demos stay isolated.
 
 ---
 
@@ -221,4 +224,4 @@ Each wave ships a **file or a mode** the user can click. No wave is “research 
 
 World-class lightweight ante: **install ledhu, button nijam, output file open avuthundi.** Fake path tracer / 128 GPU / DWG magic **vaddu**.
 
-Implementation status (2026-08-23): Wave **P1 quality ladder** + **P2 Present mode** + **P3 2×/4× stills and slide-path WebM** ship in the browser client (`web/js/render_adapter.js`, Present workspace / F5). VR/AR and extra CAD formats remain later waves.
+Implementation status (2026-08-23): Wave **P1 quality ladder** + **P2 Present mode** + **P3 2×/4× stills and slide-path WebM** + **P4 OBJ/STL** + **P5 WebXR VR** + honest **AR (session or GLB)** + **ASCII DXF walls** ship in the browser client. USDZ, DWG, SKP, IFC, and path tracing are still out of scope.
