@@ -1,2 +1,2 @@
-/** Footprint of a single bed, in meters. */
-export const BED_FOOTPRINT = { width: 1.0, length: 2.0 }
+/** Footprint of a king-size bed, in meters (standard 1.93m x 2.03m mattress). */
+export const BED_FOOTPRINT = { width: 1.93, length: 2.03 }
