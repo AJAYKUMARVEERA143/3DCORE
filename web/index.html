@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Core Studio — Blender 4.0 & SketchUp Professional Suite</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%235b9bd5'/%3E%3Cstop offset='100%25' stop-color='%232f6fdc'/%3E%3C/linearGradient%3E%3ClinearGradient id='gem' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%237ee8fa'/%3E%3Cstop offset='55%25' stop-color='%234a6fe8'/%3E%3Cstop offset='100%25' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='2' y='2' width='60' height='60' rx='16' fill='url(%23bg)'/%3E%3Ctext x='32' y='43' font-family='Arial,sans-serif' font-weight='900' font-size='28' fill='%23e8edf5' text-anchor='middle'%3E3D%3C/text%3E%3Cpolygon points='32,17 43,23.5 43,36.5 32,43 21,36.5 21,23.5' fill='url(%23gem)' stroke='%23fff' stroke-width='1' opacity='0.92'/%3E%3Cpolygon points='32,17 43,23.5 32,30 21,23.5' fill='%23a5f3fc' opacity='0.55'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lights/RectAreaLightUniformsLib.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/SimplexNoise.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSAOShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/Pass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SSAOPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════ (1) TOP HEADER ═══════════════════════════════════ -->
+<header class="blender-top-header">
+  <div class="top-header-left">
+    <div class="blender-icon-logo" title="3D Core Studio">
+      <svg viewBox="0 0 64 64" width="20" height="20"><defs><linearGradient id="logoBg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#5b9bd5"/><stop offset="100%" stop-color="#2f6fdc"/></linearGradient><linearGradient id="logoGem" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7ee8fa"/><stop offset="55%" stop-color="#4a6fe8"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="16" fill="url(#logoBg)"/><text x="32" y="43" font-family="Arial,sans-serif" font-weight="900" font-size="28" fill="#e8edf5" text-anchor="middle">3D</text><polygon points="32,17 43,23.5 43,36.5 32,43 21,36.5 21,23.5" fill="url(#logoGem)" stroke="#fff" stroke-width="1" opacity="0.92"/><polygon points="32,17 43,23.5 32,30 21,23.5" fill="#a5f3fc" opacity="0.55"/></svg>
+    </div>
+    <div class="top-menu-item" id="menu-file" onclick="toggleTopMenu(event,'menu-file')">File
+      <div class="top-menu-dropdown">
+        <div class="top-menu-dropdown-item" onclick="newScene()">New Scene <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-sep"></div>
+        <div class="top-menu-dropdown-item" onclick="saveProjectFile()">Save Project <span class="kbd">Ctrl+S</span></div>
+        <div class="top-menu-dropdown-item" onclick="triggerOpenProjectFile()">Open Project… <span class="kbd">Ctrl+O</span></div>
+        <div class="top-menu-dropdown-item" onclick="saveProjectToBrowser()">Quick Save (browser) <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="loadProjectFromBrowser()">Quick Load (browser) <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-sep"></div>
+        <div class="top-menu-dropdown-item" onclick="triggerImportGLB()">Import GLB… <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exportGLB()">Export GLB <span class="kbd"></span></div>
+      </div>
+    </div>
+    <div class="top-menu-item" id="menu-edit" onclick="toggleTopMenu(event,'menu-edit')">Edit
+      <div class="top-menu-dropdown">
+        <div class="top-menu-dropdown-item" onclick="undo()">Undo <span class="kbd">Ctrl+Z</span></div>
+        <div class="top-menu-dropdown-item" onclick="redo()">Redo <span class="kbd">Ctrl+Y</span></div>
+      </div>
+    </div>
+    <div class="top-menu-item" onclick="setShadingMode('RAYTRACE')">Render</div>
+    <div class="top-menu-item" id="menu-ai" onclick="toggleTopMenu(event,'menu-ai')">AI
+      <div class="top-menu-dropdown">
+        <div class="top-menu-dropdown-item" onclick="toggleAIPanel()">AI Assistant… <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="toggleAISettingsPanel()">AI Settings… <span class="kbd"></span></div>
+      </div>
+    </div>
+    <div class="top-menu-item" id="menu-window" onclick="toggleTopMenu(event,'menu-window')">Window
+      <div class="top-menu-dropdown">
+        <div class="top-menu-dropdown-item" onclick="resetDockLayout()">Reset Layout <span class="kbd"></span></div>
+      </div>
+    </div>
+    <div class="top-menu-item" id="menu-help" onclick="toggleTopMenu(event,'menu-help')">Help
+      <div class="top-menu-dropdown">
+        <div class="top-menu-dropdown-item" onclick="openHelpDesk()">Help Desk — How to Use <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="showKeyboardShortcuts()">Keyboard Shortcuts <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="showAboutDialog()">About 3D Core Studio <span class="kbd"></span></div>
+      </div>
+    </div>
+    <input type="file" id="file-open-project" accept=".json,.3dcore.json" style="display:none" onchange="handleOpenProjectFile(event)">
+    <input type="file" id="file-import-glb" accept=".glb,.gltf" style="display:none" onchange="handleImportGLBFile(event)">
+
+    <!-- Workspace Tabs Strip -->
+    <div class="workspace-tabs-strip">
+      <div class="ws-tab-chip active" onclick="switchWS(this,'layout')">Layout</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'sketchup')">SketchUp CAD</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'model')">Modeling</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'sculpt')">Sculpting</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'anim')">Animation</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'shade')">Shading (PBR)</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'render')">Cycles Render</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'bim')">BIM Architecture</div>
+      <div class="ws-tab-chip" onclick="openAssetLibrary()">Asset Library</div>
+    </div>
+  </div>
+
+  <div class="top-header-right">
+    <div style="font-size:10.5px; color:var(--b-text-sub); display:flex; gap:6px;">
+      <span>Scene</span>
+      <span>|</span>
+      <span>ViewLayer</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════ (2) VIEWPORT TOP SUB-HEADER ═══════════════════════════════════ -->
+<div class="viewport-top-toolbar">
+  <div class="v-toolbar-left">
+    <select class="mode-pill-dropdown" id="app-mode-selector" onchange="switchInteractionMode(this.value)">
+      <option value="object">Object Mode</option>
+      <option value="edit">Edit Mode (Tab)</option>
+      <option value="sketchup">SketchUp CAD Mode</option>
+      <option value="sculpt">Sculpt Mode</option>
+      <option value="paint">Texture Paint</option>
+    </select>
+
+    <div id="edit-mode-pills" class="mesh-select-icons" style="display:none;">
+      <div class="mesh-sel-btn active" id="pill-vert" onclick="toggleMeshSelectMode('vertex')" title="Vertex Select — toggle on/off, combinable with Edge/Face (1)">▫️ 1</div>
+      <div class="mesh-sel-btn" id="pill-edge" onclick="toggleMeshSelectMode('edge')" title="Edge Select — toggle on/off, combinable with Vertex/Face (2)">➖ 2</div>
+      <div class="mesh-sel-btn" id="pill-face" onclick="toggleMeshSelectMode('face')" title="Face Select — toggle on/off, combinable with Vertex/Edge (3)">⬛ 3</div>
+    </div>
+
+    <div class="v-sub-menu">
+      <div class="v-sub-item">View</div>
+      <div class="v-sub-item">Select</div>
+      <div class="v-sub-item" onclick="addPrimitive('cube')">Add</div>
+      <div class="v-sub-item">Object</div>
+    </div>
+  </div>
+
+  <div style="display:flex; align-items:center; gap:8px;">
+    <div style="background:#151515; border:1px solid #333; padding:2px 7px; border-radius:3px; font-size:10px; color:#aaa;">🌐 Global</div>
+    <div style="background:#151515; border:1px solid #333; padding:2px 7px; border-radius:3px; font-size:10px; color:#aaa;">🧲 Snap: 3D Grid</div>
+  </div>
+
+  <div class="v-toolbar-right">
+    <select id="style-preset-select" onchange="applyStyle(this.value)" title="Style preset" style="font-size:10px; background:#151515; border:1px solid #333; color:#aaa; border-radius:3px; margin-right:6px;">
+      <option value="photoreal">Style: Photoreal</option>
+      <option value="blueprint">Style: Blueprint</option>
+    </select>
+    <div class="shading-spheres-group">
+      <div class="shading-sphere sphere-wire" onclick="setShadingMode('WIREFRAME')" title="Wireframe (Workbench)"></div>
+      <div class="shading-sphere sphere-solid" onclick="setShadingMode('SOLID')" title="Solid (Workbench)"></div>
+      <div class="shading-sphere sphere-mat active" onclick="setShadingMode('MATERIAL')" title="Material Preview (EEVEE)"></div>
+      <div class="shading-sphere sphere-render" onclick="setShadingMode('RAYTRACE')" title="Rendered (Cycles Path Tracer)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════ (3) MAIN STAGE (VIEWPORT + SKETCHUP PALETTE + OUTLINER + PROPERTIES) ═══════════════════════════════════ -->
+<div class="blender-main-stage">
+
+  <!-- Top dock rail (empty by default) -->
+  <div id="dock-top" class="dock-rail dock-rail-h" style="position:absolute; top:0; left:0; width:100%; z-index:45;"></div>
+
+  <!-- Left dock rail (empty by default) -->
+  <div id="dock-left" class="dock-rail dock-rail-v"></div>
+
+  <!-- Live per-tool settings — appears next to the toolbar while a BIM
+       tool (Wall/Slab/Opening) is active, matching "select a tool -> its
+       settings open right there" rather than being buried in a menu. -->
+  <div id="tool-settings-panel" style="display:none; position:absolute; left:56px; top:12px; background:var(--b-bg-panel); border:1px solid var(--b-border-light); border-radius:6px; padding:8px; z-index:41; width:170px; box-shadow:0 6px 20px rgba(0,0,0,0.5);">
+    <div id="tool-settings-title" style="font-size:10px; font-weight:700; margin-bottom:6px; color:#fff;">Tool Settings</div>
+    <div id="tool-settings-wall" style="display:none;">
+      <label style="font-size:9.5px; color:#aaa; display:block;">Thickness (m)
+        <input type="number" id="wall-thickness" value="0.2" step="0.05" min="0.02" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="wallSettings.thickness=parseFloat(this.value)||0.2">
+      </label>
+      <label style="font-size:9.5px; color:#aaa; display:block; margin-top:6px;">Height (m)
+        <input type="number" id="wall-height" value="2.7" step="0.1" min="0.5" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="wallSettings.height=parseFloat(this.value)||2.7">
+      </label>
+      <div style="font-size:9px; color:var(--b-text-muted); margin-top:6px;">Click points to draw the wall path, double-click or Enter to finish.</div>
+    </div>
+    <div id="tool-settings-slab" style="display:none;">
+      <label style="font-size:9.5px; color:#aaa; display:block;">Thickness (m)
+        <input type="number" id="slab-thickness" value="0.15" step="0.05" min="0.02" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="slabSettings.thickness=parseFloat(this.value)||0.15">
+      </label>
+      <div style="font-size:9px; color:var(--b-text-muted); margin-top:6px;">Click 3+ corners to define the slab outline, double-click or Enter to finish.</div>
+    </div>
+    <div id="tool-settings-opening" style="display:none;">
+      <label style="font-size:9.5px; color:#aaa; display:block;">Preset
+        <select id="opening-preset" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="applyOpeningPreset(this.value)">
+          <option value="">Custom</option>
+        </select>
+      </label>
+      <label style="font-size:9.5px; color:#aaa; display:block; margin-top:6px;">Width (m)
+        <input type="number" id="opening-width" value="0.9" step="0.05" min="0.1" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="openingSettings.width=parseFloat(this.value)||0.9">
+      </label>
+      <label style="font-size:9.5px; color:#aaa; display:block; margin-top:6px;">Height (m)
+        <input type="number" id="opening-height" value="2.1" step="0.05" min="0.1" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="openingSettings.height=parseFloat(this.value)||2.1">
+      </label>
+      <label style="font-size:9.5px; color:#aaa; display:block; margin-top:6px;">Sill Height (m) <span title="0 = door, >0 = window">ⓘ</span>
+        <input type="number" id="opening-sill" value="0" step="0.05" min="0" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="openingSettings.sill=parseFloat(this.value)||0">
+      </label>
+      <button class="transport-btn" style="width:100%; margin-top:6px;" onclick="saveOpeningPreset()">Save as Preset…</button>
+      <div style="font-size:9px; color:var(--b-text-muted); margin-top:6px;">Click a wall, then drag a rectangle on it to cut the opening.</div>
+    </div>
+  </div>
+
+  <!-- SketchUp "Getting Started" Floating Tool Palette (Official UTC Guide) -->
+  <div class="sketchup-getting-started-dock dockable-panel" id="su-toolbar" data-panel-id="sketchup-toolbar">
+    <div class="dock-panel-header" style="width:100%; margin:-4px -3px 2px; padding:3px 4px; border-radius:5px 5px 0 0;"><span style="font-size:8px;">⠿ Tools</span></div>
+
+    <!-- SELECT & ERASE -->
+    <button class="su-palette-btn active" id="tb-select" onclick="setActiveTool('select')" title="Select Tool (Spacebar)">
+      <svg viewBox="0 0 20 20"><path d="M4 2l12 8-6 2-3 6z" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-eraser" onclick="setActiveTool('eraser')" title="Eraser (E)">
+      <svg viewBox="0 0 20 20"><rect x="3" y="10" width="14" height="6" rx="1" fill="currentColor"/><polygon points="3,10 10,3 17,10" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-select_box" onclick="setActiveTool('select_box')" title="Select Box — drag a rectangle over an object">
+      <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-select_circle" onclick="setActiveTool('select_circle')" title="Select Circle — drag a circle over an object">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
+    </button>
+
+    <div class="su-tool-sep"></div>
+
+    <!-- DRAWING TOOLS (Pencil, Rectangle, Circle, Arc) -->
+    <button class="su-palette-btn" id="tb-line" onclick="setActiveTool('line')" title="Line / Pencil (L) — Snaps to Axes">
+      <svg viewBox="0 0 20 20"><line x1="3" y1="17" x2="17" y2="3" stroke="currentColor" stroke-width="2"/><circle cx="3" cy="17" r="2" fill="currentColor"/><circle cx="17" cy="3" r="2" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-rect" onclick="setActiveTool('rect')" title="Rectangle — Ground Plane (toolbar only; R is reserved for Rotate)">
+      <svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="10" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-circle" onclick="setActiveTool('circle')" title="Circle (C)">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-arc" onclick="setActiveTool('arc')" title="2-Point Arc (A)">
+      <svg viewBox="0 0 20 20"><path d="M3 17 Q10 3 17 17" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="3" cy="17" r="2" fill="currentColor"/><circle cx="17" cy="17" r="2" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-polygon" onclick="setActiveTool('polygon')" title="Polygon — click center, drag radius">
+      <svg viewBox="0 0 20 20"><polygon points="10,2 17,7 15,16 5,16 3,7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-rotrect" onclick="setActiveTool('rotrect')" title="Rotated Rectangle — click corner, click base edge end, click depth">
+      <svg viewBox="0 0 20 20"><rect x="4" y="4" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" transform="rotate(-18 10 10)"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-pie" onclick="setActiveTool('pie')" title="Pie — click center, drag radius">
+      <svg viewBox="0 0 20 20"><path d="M10 10 L17 10 A7 7 0 0 1 10 17 Z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1" fill="none" opacity="0.4"/></svg>
+    </button>
+    <input type="number" id="polygon-sides-input" value="6" min="3" max="24" step="1" title="Polygon sides" style="width:34px; font-size:10px; margin-left:2px;" oninput="polygonSides = Math.max(3, parseInt(this.value)||6)">
+    <input type="number" id="pie-sweep-input" value="90" min="1" max="359" step="5" title="Pie sweep angle (degrees)" style="width:34px; font-size:10px; margin-left:2px;" oninput="pieSweepDeg = Math.max(1, parseFloat(this.value)||90)">
+    <button class="su-palette-btn" id="tb-wall" onclick="setActiveTool('wall')" title="Wall — click points to draw, double-click/Enter to finish">
+      <svg viewBox="0 0 20 20"><rect x="2" y="4" width="16" height="4" fill="currentColor"/><rect x="2" y="9" width="7" height="4" fill="currentColor"/><rect x="11" y="9" width="7" height="4" fill="currentColor"/><rect x="2" y="14" width="16" height="4" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-slab" onclick="setActiveTool('slab')" title="Slab/Floor — click 3+ corners, double-click/Enter to finish">
+      <svg viewBox="0 0 20 20"><polygon points="3,15 3,7 10,3 17,7 17,15 10,18" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-opening" onclick="setActiveTool('opening')" title="Window/Door Opening — drag a rectangle on a wall to cut it">
+      <svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="6" y="6" width="8" height="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2"/></svg>
+    </button>
+
+    <div class="su-tool-sep"></div>
+
+    <button class="su-palette-btn" id="tb-walk" onclick="setActiveTool('walk')" title="Walk — WASD to move (eye height locked), drag to look, Esc to exit">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="4" r="2" fill="currentColor"/><line x1="10" y1="7" x2="10" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="5" y2="8" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="9" x2="15" y2="8" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="13" x2="6" y2="18" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="13" x2="14" y2="18" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-lookaround" onclick="setActiveTool('lookaround')" title="Look Around — drag to pivot from a fixed standing point, Esc to exit">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg>
+    </button>
+
+    <div class="su-tool-sep"></div>
+
+    <!-- EDIT TOOLS (Push/Pull, Move, Rotate, Scale, Offset) -->
+    <button class="su-palette-btn" id="tb-pushpull" onclick="setActiveTool('pushpull')" title="Push / Pull (P / U) — Extrude Face">
+      <svg viewBox="0 0 20 20"><rect x="3" y="11" width="14" height="7" fill="currentColor" opacity=".35" stroke="currentColor" stroke-width="1.2"/><line x1="10" y1="16" x2="10" y2="2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M6.5 5.5 L10 2 L13.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 12.5 L10 16 L13.5 12.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-offset" onclick="setActiveTool('offset')" title="Offset (F) — Inset Perimeter">
+      <svg viewBox="0 0 20 20"><rect x="4" y="4" width="12" height="12" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="7" y="7" width="6" height="6" stroke="currentColor" stroke-width="1" stroke-dasharray="2" fill="none"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-move" onclick="setActiveTool('move')" title="Move / Copy (M / G)">
+      <svg viewBox="0 0 20 20"><path d="M10 2v16M2 10h16M10 2l-2.5 3h5zM10 18l-2.5-3h5zM2 10l3-2.5v5zM18 10l-3-2.5v5z" stroke="currentColor" stroke-width="1.2" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-rotate" onclick="setActiveTool('rotate')" title="Rotate (Q / R)">
+      <svg viewBox="0 0 20 20"><path d="M14 4a8 8 0 1 1-5 1" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M14 2v4h-4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-scale" onclick="setActiveTool('scale')" title="Scale (S)">
+      <svg viewBox="0 0 20 20"><rect x="6" y="6" width="8" height="8" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="2" y="2" width="3" height="3" fill="currentColor"/><rect x="15" y="2" width="3" height="3" fill="currentColor"/><rect x="2" y="15" width="3" height="3" fill="currentColor"/><rect x="15" y="15" width="3" height="3" fill="currentColor"/></svg>
+    </button>
+
+    <div class="su-tool-sep"></div>
+
+    <!-- MEASURE & PAINT -->
+    <button class="su-palette-btn" id="tb-tape" onclick="setActiveTool('tape')" title="Tape Measure (T) — Dimension & Guides">
+      <svg viewBox="0 0 20 20"><rect x="2" y="8" width="16" height="4" rx="1" fill="currentColor" opacity=".5"/><line x1="5" y1="6" x2="5" y2="14" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="6" x2="10" y2="14" stroke="currentColor" stroke-width="1.5"/><line x1="15" y1="6" x2="15" y2="14" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-paint" onclick="switchRightTab('mat')" title="Paint Bucket (B) — Materials">
+      <svg viewBox="0 0 20 20"><path d="M5 4l6-2 5 8-6 2z" fill="currentColor"/><path d="M16 10l2 4-2 3" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+    </button>
+
+    <div class="su-tool-sep"></div>
+
+    <!-- BLENDER MESH EDIT -->
+    <button class="su-palette-btn" onclick="executeMeshEditTool('extrude')" title="Extrude Region (E)">⤓</button>
+    <button class="su-palette-btn" onclick="executeMeshEditTool('bevel')" title="Bevel Edges (Ctrl+B)">◸</button>
+    <button class="su-palette-btn" onclick="setSculptBrush('draw')" title="Sculpt Brush">🖌</button>
+    <button class="su-palette-btn" onclick="addPrimitive('cube')" title="Add Cube">📦</button>
+  </div>
+
+  <!-- 3D Viewport Area -->
+  <div class="blender-viewport-area">
+    <canvas id="viewport-canvas"></canvas>
+    <canvas id="su-canvas"></canvas>
+
+    <!-- Top-Left HUD Telemetry -->
+    <div class="viewport-hud-text">
+      <span class="hud-persp-title" id="hud-view-title">User Perspective</span>
+      <span class="hud-collection-info" id="hud-col-info">(1) Collection | Cube</span>
+    </div>
+
+    <!-- Navigation Bubble Gizmo & Camera Tools (Top Right) -->
+    <div class="viewport-nav-bubble-gizmo">
+      <div class="viewcube-wrap">
+        <button class="viewcube-home-btn" onclick="setViewAngle('persp')" title="Home View">⌂</button>
+        <button class="viewcube-rotate-btn viewcube-rotate-left" onclick="rotateViewCubeCompass(-90)" title="Rotate View Left 90°">↺</button>
+        <button class="viewcube-rotate-btn viewcube-rotate-right" onclick="rotateViewCubeCompass(90)" title="Rotate View Right 90°">↻</button>
+        <canvas id="viewcube-canvas" class="viewcube-canvas" width="88" height="88" title="Click a face to snap to that view"></canvas>
+      </div>
+      <button class="nav-gizmo-mini-btn" onclick="toggleCameraView()" title="Camera View (Num0)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="14" height="10" rx="1.5"/><path d="M16 10.5 22 7v10l-6-3.5z"/></svg>
+      </button>
+      <button class="nav-gizmo-mini-btn" onclick="zoomExtents()" title="Zoom to Selected (Num.)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="7"/><line x1="21" y1="21" x2="15.8" y2="15.8"/></svg>
+      </button>
+      <button class="nav-gizmo-mini-btn" onclick="setViewAngle('persp')" title="Toggle Ortho/Persp (Num5)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3 20 7.5v9L12 21 4 16.5v-9z"/><path d="M12 3v18M4 7.5l8 4.5 8-4.5"/></svg>
+      </button>
+      <button class="nav-gizmo-mini-btn" onclick="setViewAngle('bottom')" title="Bottom View (Ctrl+Num7)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="18"/><polyline points="6,12 12,18 18,12"/></svg>
+      </button>
+    </div>
+
+    <!-- Inference tooltip (AutoCAD/SketchUp-style "On Vertex" / "On Red Axis" hint) -->
+    <div id="inference-tooltip" class="inference-tooltip"></div>
+
+    <!-- SketchUp Value Control Box (VCB / Measurements) (Bottom-Right of Viewport) -->
+    <div class="sketchup-measurement-vcb-box" id="su-vcb" style="display:flex; align-items:center; gap:8px;">
+      <span class="vcb-label" id="vcb-label">Measurements:</span>
+      <span class="vcb-value" id="vcb-value">0.00 m</span>
+      <select class="units-quick-select" onchange="setAppUnits(this.value)" title="Units — applies to Tape Measure, Rectangle/Circle, Push/Pull" style="background:#151515; border:1px solid #333; color:#aaa; font-size:9.5px; border-radius:3px; padding:1px 3px;">
+        <option value="m">m</option>
+        <option value="cm">cm</option>
+        <option value="mm">mm</option>
+        <option value="ft">ft</option>
+        <option value="in">in</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ═══ (4 & 5) RIGHT DOCK: OUTLINER + PROPERTIES (dockable) ═══ -->
+  <div id="dock-right" class="dock-rail dock-rail-v">
+  <div class="dockable-panel docked-right" data-panel-id="outliner-props">
+    <div class="dock-panel-header"><span>⠿ Outliner &amp; Properties</span></div>
+    <div class="dock-panel-body">
+
+    <!-- (4) Outliner Pane (Top-Right) -->
+    <div class="outliner-box">
+      <div class="outliner-topbar">
+        <span>Scene Collection</span>
+        <input type="text" class="outliner-search-input" placeholder="Search…">
+      </div>
+      <div class="outliner-tree-list" id="outliner-tree-list"></div>
+    </div>
+
+    <!-- (5) Properties Editor Pane (Bottom-Right) -->
+    <div class="properties-editor-box">
+
+      <!-- Left Vertical Tab Strip -->
+      <div class="properties-vertical-strip">
+        <div class="p-strip-btn active" id="tab-btn-object" title="Object Properties" onclick="switchRightTab('object')">📦</div>
+        <div class="p-strip-btn" id="tab-btn-mod" title="Modifiers Stack" onclick="switchRightTab('mod')">🔧</div>
+        <div class="p-strip-btn" id="tab-btn-mat" title="Material Properties" onclick="switchRightTab('mat')">🎨</div>
+        <div class="p-strip-btn" id="tab-btn-anim" title="Animation / DopeSheet" onclick="switchRightTab('anim')">🎬</div>
+        <div class="p-strip-btn" id="tab-btn-sculpt" title="Sculpt Brushes" onclick="switchRightTab('sculpt')">🖌</div>
+        <div class="p-strip-btn" id="tab-btn-render" title="Render Settings" onclick="switchRightTab('render')">🌐</div>
+        <div class="p-strip-btn" id="tab-btn-sketchup" title="SketchUp Inferences & Tools" onclick="switchRightTab('sketchup')">📐</div>
+      </div>
+
+      <!-- Properties Body Scroll Area -->
+      <div class="properties-body-scroll" id="properties-body">
+
+        <!-- Object Properties Tab -->
+        <div id="tab-object" style="display:flex; flex-direction:column; gap:4px;">
+          <input type="text" id="prop-name" value="Cube" style="background:#181818; border:1px solid #333; color:#fff; padding:3px 6px; border-radius:3px; font-weight:700;" onchange="updateFromInspector()">
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Transform</div>
+            <div class="b-accordion-content">
+              <!-- Location X Y Z -->
+              <div class="prop-numeric-row">
+                <span class="prop-label">Location X</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-x">X</span><input type="number" id="prop-px" value="0.00" step="0.1" onchange="updateFromInspector()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Location Y</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-y">Y</span><input type="number" id="prop-py" value="0.00" step="0.1" onchange="updateFromInspector()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Location Z</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-z">Z</span><input type="number" id="prop-pz" value="0.00" step="0.1" onchange="updateFromInspector()"></div></div>
+              </div>
+
+              <!-- Rotation X Y Z -->
+              <div class="prop-numeric-row" style="margin-top:4px;">
+                <span class="prop-label">Rotation X</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-x">X</span><input type="number" id="prop-rx" value="0" step="5" onchange="updateFromInspector()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Rotation Y</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-y">Y</span><input type="number" id="prop-ry" value="0" step="5" onchange="updateFromInspector()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Rotation Z</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-z">Z</span><input type="number" id="prop-rz" value="0" step="5" onchange="updateFromInspector()"></div></div>
+              </div>
+
+              <!-- Scale X Y Z -->
+              <div class="prop-numeric-row" style="margin-top:4px;">
+                <span class="prop-label">Scale X</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-x">X</span><input type="number" id="prop-sx" value="1.00" step="0.1" onchange="updateFromInspector()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Scale Y</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-y">Y</span><input type="number" id="prop-sy" value="1.00" step="0.1" onchange="updateFromInspector()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Scale Z</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-z">Z</span><input type="number" id="prop-sz" value="1.00" step="0.1" onchange="updateFromInspector()"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▶ Delta Transform</div>
+            <div class="b-accordion-content" style="display:none;">
+              <div class="prop-numeric-row">
+                <span class="prop-label">Delta Location X</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-x">X</span><input type="number" id="delta-px" value="0.00" step="0.1" onchange="applyDeltaTransform()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Delta Location Y</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-y">Y</span><input type="number" id="delta-py" value="0.00" step="0.1" onchange="applyDeltaTransform()"></div></div>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Delta Location Z</span>
+                <div class="xyz-num-inputs"><div class="xyz-input-wrap"><span class="xyz-tag tag-z">Z</span><input type="number" id="delta-pz" value="0.00" step="0.1" onchange="applyDeltaTransform()"></div></div>
+              </div>
+              <div style="color:var(--b-text-muted); font-size:9px; margin-top:2px;">An extra offset added on top of the object's normal Location — edit these to nudge it, independent of the Transform panel above.</div>
+              <button class="transport-btn" style="margin-top:4px;" onclick="resetDeltaTransform()">Reset Delta</button>
+            </div>
+          </div>
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▶ Relations &amp; Visibility</div>
+            <div class="b-accordion-content" style="display:none;">
+              <div class="prop-numeric-row"><span class="prop-label">Parent</span><span style="color:var(--b-text-muted); font-size:10px;">None (root)</span></div>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:4px;"><input type="checkbox" id="rel-visible" checked onchange="setSelectedVisibility(this.checked)"> Show in Viewport</label>
+              <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="rel-selectable" checked onchange="setSelectedSelectable(this.checked)"> Selectable</label>
+              <div class="prop-numeric-row" style="margin-top:6px;">
+                <span class="prop-label">Tag/Layer</span>
+                <select id="entity-layer-select" style="flex:1; font-size:10px;" onchange="assignSelectedToLayer(this.value)"></select>
+              </div>
+            </div>
+          </div>
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▶ Entity Info</div>
+            <div class="b-accordion-content" style="display:none; font-size:10.5px; color:#ccc;">
+              <div class="prop-numeric-row"><span class="prop-label">Type</span><span id="entity-info-type">—</span></div>
+              <div class="prop-numeric-row"><span class="prop-label">Material</span><span id="entity-info-material">—</span></div>
+              <div class="prop-numeric-row"><span class="prop-label">Vertices</span><span id="entity-info-verts">—</span></div>
+              <div class="prop-numeric-row"><span class="prop-label">Triangles</span><span id="entity-info-tris">—</span></div>
+              <div class="prop-numeric-row"><span class="prop-label">Area</span><span id="entity-info-area">—</span></div>
+            </div>
+          </div>
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▶ Tags / Layers</div>
+            <div class="b-accordion-content" style="display:none;">
+              <div id="layers-list" style="display:flex; flex-direction:column; gap:2px;"></div>
+              <div style="display:flex; gap:4px; margin-top:6px;">
+                <input type="text" id="new-layer-name" placeholder="New tag name" style="flex:1; font-size:10px;">
+                <button class="transport-btn" onclick="createLayerFromInput()">+ Add</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modifiers Tab -->
+        <div id="tab-mod" style="display:none; flex-direction:column; gap:4px;">
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Mesh Edit Tools (Edit Mode — select a face/vertex/edge first)</div>
+            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button class="transport-btn" onclick="executeMeshEditTool('extrude')" title="Extrude Region (E)">Extrude Region</button>
+              <button class="transport-btn" onclick="setActiveTool('extrude_normals')" title="Select a face, click this, then drag on the mesh to set the amount">Extrude Along Normals</button>
+              <button class="transport-btn" onclick="setActiveTool('extrude_individual')" title="Select face(s), click this, then drag on the mesh to set the amount">Extrude Individual</button>
+              <button class="transport-btn" onclick="setActiveTool('extrude_to_cursor')" title="Select a face, click this, then click a point in the viewport">Extrude to Cursor</button>
+              <button class="transport-btn" onclick="executeMeshEditTool('inset')" title="Inset Faces (I) — or use Offset (F) in the toolbar to drag the amount">Inset Faces</button>
+              <button class="transport-btn" onclick="setActiveTool('bevel')" title="Select a face, click this, then drag on the mesh to set the amount">Bevel</button>
+              <button class="transport-btn" onclick="setActiveTool('shrink_fatten')" title="Select a face, click this, then drag on the mesh to set the amount">Shrink/Fatten</button>
+              <button class="transport-btn" onclick="setActiveTool('to_sphere')" title="Select face(s), click this, then drag on the mesh to set the amount">To Sphere</button>
+              <button class="transport-btn" onclick="executeMeshEditTool('subdivide')" title="Subdivide">Subdivide</button>
+              <button class="transport-btn" onclick="executeMeshEditTool('smooth')" title="Smooth Vertices">Smooth</button>
+              <button class="transport-btn" onclick="executeMeshEditTool('randomize')" title="Randomize Vertices">Randomize</button>
+              <button class="transport-btn" onclick="executeMeshEditTool('spin')" title="Revolve the last-drawn Line/Arc profile (SketchUp CAD tab) around Z">Spin (from Line/Arc)</button>
+              <button class="transport-btn" onclick="executeMeshEditTool('follow_me')" title="Face Select a face, draw a Line/Arc path (SketchUp CAD tab), then Follow Me sweeps the face along it">Follow Me (from Line/Arc)</button>
+              <button class="transport-btn" onclick="setActiveTool('vertex_slide')" title="Vertex Select a corner (pill above), click this, then drag on the mesh">Vertex Slide</button>
+              <button class="transport-btn" onclick="setActiveTool('edge_slide')" title="Edge Select an edge (pill above), click this, then drag on the mesh">Edge Slide</button>
+              <button class="transport-btn" onclick="setActiveTool('bisect')" title="Click this, then drag a line across the viewport to cut the mesh with a plane">Bisect</button>
+              <button class="transport-btn" onclick="setActiveTool('knife')" title="Face Select a face, click this, then click two points on it to cut">Knife (on selected face)</button>
+              <button class="transport-btn" onclick="executeMeshEditTool('loopcut')" title="Splits the selected face into two along its longest axis">Loop Cut (selected face)</button>
+              <button class="transport-btn" onclick="setActiveTool('poly_build')" title="Click points in the viewport to build a new face, double-click/Enter to finish">Poly Build</button>
+              <button class="transport-btn" onclick="runDeleteSubElement()" title="Delete/Dissolve (X) the selected face/vertex/edge">Delete Selection</button>
+              <button class="transport-btn" onclick="runMergeByDistance()" title="Merge by Distance (M) — welds nearby vertices">Merge by Distance</button>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Normals &amp; Shading</div>
+            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button class="transport-btn" onclick="shadeSmooth()" title="Shade Smooth">Shade Smooth</button>
+              <button class="transport-btn" onclick="shadeFlat()" title="Shade Flat">Shade Flat</button>
+              <button class="transport-btn" onclick="runRecalculateNormals()" title="Recalculate Normals Outside (Alt+N)">Recalc Normals (Outside)</button>
+              <button class="transport-btn" onclick="runFlipNormals()" title="Flip Normals — selected face(s), or whole mesh if none selected">Flip Normals</button>
+              <button class="transport-btn" style="grid-column: span 2;" onclick="toggleFaceOrientation()" title="Toggle Face Orientation overlay — blue=outward, red=inward/flipped">Toggle Face Orientation</button>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Modifier Stack (selected object)</div>
+            <div class="b-accordion-content" id="mod-stack-list">
+              <div style="color:#666; font-size:10px; padding:4px;">No modifiers applied yet.</div>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Add Modifier</div>
+            <div class="b-accordion-content" id="modifier-add-list"></div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Boolean (2 objects — select one, click this, then click the other)</div>
+            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button class="transport-btn" onclick="applyBlenderModifier('BOOLEAN_UNION')" title="Merge two shapes into one">Union (Merge)</button>
+              <button class="transport-btn" onclick="applyBlenderModifier('BOOLEAN_DIFF')" title="Subtract the second shape from the first">Subtract</button>
+              <button class="transport-btn" onclick="applyBlenderModifier('BOOLEAN_INTERSECT')" title="Keep only the overlapping volume">Intersect</button>
+              <button class="transport-btn" onclick="applyBlenderModifier('HOLLOW')" title="Hollow out the selected object into a shell (10cm wall)">Hollow (Shell)</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Material Properties Tab (Paint Bucket / Principled BSDF) -->
+        <div id="tab-mat" style="display:none; flex-direction:column; gap:4px;">
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Principled BSDF Material</div>
+            <div class="b-accordion-content">
+              <div class="prop-numeric-row">
+                <span class="prop-label">Base Color</span>
+                <input type="color" id="mat-color" value="#cccccc" onchange="applyColorMat()">
+                <button class="transport-btn" style="padding:2px 8px;" onclick="setActiveTool('eyedropper')" title="Color Sample — click any surface in the viewport to pick up its material">💧</button>
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Roughness</span>
+                <input type="range" id="mat-rough" min="0" max="1" step="0.01" value="0.5" oninput="applyColorMat()">
+              </div>
+              <div class="prop-numeric-row">
+                <span class="prop-label">Metallic</span>
+                <input type="range" id="mat-metal" min="0" max="1" step="0.01" value="0.0" oninput="applyColorMat()">
+              </div>
+
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Material Library</div>
+            <div class="b-accordion-content">
+              <div id="mat-library-tabs" class="mat-library-tabs"></div>
+              <div id="mat-library-hint" style="font-size:9.5px; color:var(--b-text-sub); margin:5px 0;">Drag a swatch onto any surface, or click one to apply to the selected object.</div>
+              <div id="mat-library-grid" class="mat-library-grid"></div>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Image Texture</div>
+            <div class="b-accordion-content">
+              <div id="mat-tex-preview-row" style="display:none; align-items:center; gap:8px; margin-bottom:6px;">
+                <img id="mat-tex-thumb" style="width:36px; height:36px; object-fit:cover; border-radius:3px; border:1px solid var(--b-border-light);">
+                <span id="mat-tex-filename" style="font-size:10px; color:#aaa; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+                <button class="transport-btn" style="padding:2px 8px;" onclick="clearMaterialTexture()">✕</button>
+              </div>
+              <button class="transport-btn" style="width:100%;" onclick="triggerUploadTexture()">📁 Upload Image…</button>
+              <input type="file" id="file-upload-texture" accept="image/*" style="display:none" onchange="handleUploadTextureFile(event)">
+            </div>
+          </div>
+        </div>
+
+        <!-- SketchUp Helpers & Inferences Tab -->
+        <div id="tab-sketchup" style="display:none; flex-direction:column; gap:4px;">
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ SketchUp Inferences Guide</div>
+            <div class="b-accordion-content" style="font-size:10px; color:#aaa; line-height:1.6;">
+              <div>🔴 Red Axis (X) — Parallel to Red Axis</div>
+              <div>🟢 Green Axis (Y) — Parallel to Green Axis</div>
+              <div>🔵 Blue Axis (Z) — Parallel to Blue Axis</div>
+              <div>🔵 On Edge — Point along geometry edge</div>
+              <div>🟢 On Face — Projected onto face plane</div>
+              <div>🟡 Midpoint — Center of line segment</div>
+              <div>🔴 Endpoint / On Point — Vertex intersection</div>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:6px;"><input type="checkbox" id="tangent-snap-toggle" checked onchange="toggleTangentSnap(this.checked)"> Tangent Snap</label>
+            </div>
+          </div>
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Push/Pull Quick Extrude</div>
+            <div class="b-accordion-content">
+              <div class="prop-numeric-row">
+                <span class="prop-label">Distance</span>
+                <input type="number" id="pp-depth" value="2.5" step="0.1" style="background:#151515; border:1px solid #333; color:#fff; padding:2px 4px; text-align:right;">
+              </div>
+              <button class="transport-btn btn-play" style="margin-top:4px; width:100%;" onclick="doPushPull()">Extrude Selected Face</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Animation Tab -->
+        <div id="tab-anim" style="display:none; flex-direction:column; gap:4px;">
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Timeline</div>
+            <div class="b-accordion-content" style="display:flex; flex-direction:column; gap:6px;">
+              <div class="timeline-left-menus" style="flex-wrap:wrap;">
+                <div class="top-menu-item t-menu-label" id="menu-playback" onclick="toggleTopMenu(event,'menu-playback')">Playback
+                  <div class="top-menu-dropdown">
+                    <div class="top-menu-dropdown-item" onclick="togglePlay()">Play / Pause <span class="kbd">Space</span></div>
+                    <div class="top-menu-dropdown-item" onclick="setAnimFrame(1)">Jump to Start <span class="kbd"></span></div>
+                    <div class="top-menu-dropdown-item" onclick="setAnimFrame(250)">Jump to End <span class="kbd"></span></div>
+                  </div>
+                </div>
+                <div class="top-menu-item t-menu-label" id="menu-keying" onclick="toggleTopMenu(event,'menu-keying')">Keying
+                  <div class="top-menu-dropdown">
+                    <div class="top-menu-dropdown-item" onclick="insertKeyframe()">Insert Keyframe <span class="kbd">I</span></div>
+                    <div class="top-menu-dropdown-item" onclick="deleteKeyframeAtCurrentFrame()">Delete Keyframe <span class="kbd"></span></div>
+                  </div>
+                </div>
+                <div class="top-menu-item t-menu-label" id="menu-tlview" onclick="toggleTopMenu(event,'menu-tlview')">View
+                  <div class="top-menu-dropdown">
+                    <div class="top-menu-dropdown-item" onclick="zoomExtents()">Frame Selected <span class="kbd"></span></div>
+                    <div class="top-menu-dropdown-item" onclick="frameAllObjects()">Frame All <span class="kbd"></span></div>
+                  </div>
+                </div>
+                <div class="top-menu-item t-menu-label" id="menu-marker" onclick="toggleTopMenu(event,'menu-marker')">Marker
+                  <div class="top-menu-dropdown">
+                    <div class="top-menu-dropdown-item" onclick="addMarkerAtCurrentFrame()">Add Marker <span class="kbd"></span></div>
+                    <div class="top-menu-dropdown-item" onclick="jumpToPrevMarker()">Jump to Prev Marker <span class="kbd"></span></div>
+                    <div class="top-menu-dropdown-item" onclick="jumpToNextMarker()">Jump to Next Marker <span class="kbd"></span></div>
+                    <div class="top-menu-dropdown-sep"></div>
+                    <div class="top-menu-dropdown-item" onclick="clearAllMarkers()">Clear All Markers <span class="kbd"></span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="timeline-transport-btns">
+                <button class="transport-btn" onclick="setAnimFrame(1)" title="Jump to Start">⏮</button>
+                <button class="transport-btn" onclick="stepAnimFrame(-1)" title="Prev Frame">◀</button>
+                <button class="transport-btn btn-play" id="btn-play" onclick="togglePlay()" title="Play Animation">▶</button>
+                <button class="transport-btn" onclick="stepAnimFrame(1)" title="Next Frame">▶</button>
+                <button class="transport-btn" onclick="setAnimFrame(250)" title="Jump to End">⏭</button>
+                <button class="transport-btn" onclick="insertKeyframe()" title="Insert Keyframe (I)">🔑</button>
+              </div>
+
+              <div class="timeline-canvas-frame-area">
+                <canvas id="dope-canvas"></canvas>
+                <input type="range" id="anim-scrubber" min="1" max="250" value="1" oninput="onScrub(this.value)">
+              </div>
+
+              <div class="timeline-frame-boxes">
+                <span>Frame</span>
+                <span class="frame-box-num" id="frame-display">1</span>
+                <span>Start</span>
+                <span class="frame-box-num">1</span>
+                <span>End</span>
+                <span class="frame-box-num">250</span>
+              </div>
+            </div>
+          </div>
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Keyframe List</div>
+            <div class="b-accordion-content" id="keyframe-list">
+              <div style="color:var(--b-text-muted);">No keyframes. Press (I) to insert.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sculpt Tab -->
+        <div id="tab-sculpt" style="display:none; flex-direction:column; gap:4px;">
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Sculpt Brush</div>
+            <div class="b-accordion-content">
+              <div class="sculpt-brush-grid" id="sculpt-brush-grid"></div>
+              <div style="margin-top:6px;">Active: <strong id="sculpt-brush-label" style="color:var(--b-orange);">Draw</strong></div>
+              <div>Radius: <input type="range" id="sculpt-radius" min="5" max="150" value="40" oninput="sculpt.radius = parseFloat(this.value)"></div>
+              <div>Strength: <input type="range" id="sculpt-strength" min="0.05" max="1" step="0.05" value="0.5" oninput="sculpt.strength = parseFloat(this.value)"></div>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:4px;"><input type="checkbox" id="sculpt-invert" onchange="sculpt.invert = this.checked"> Invert (Draw/Inflate)</label>
+              <div style="color:var(--b-text-muted); font-size:9.5px; margin-top:4px;">Click + drag on the mesh in the viewport to sculpt.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Render Tab -->
+        <div id="tab-render" style="display:none; flex-direction:column; gap:4px;">
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Cycles Render Settings</div>
+            <div class="b-accordion-content">
+              <select onchange="setShadingMode(this.value)" style="background:#141414; border:1px solid #333; color:#fff; padding:2px;">
+                <option value="MATERIAL">EEVEE</option>
+                <option value="RAYTRACE" selected>Cycles Path Tracer</option>
+                <option value="SOLID">Workbench</option>
+              </select>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:#ccc; cursor:pointer;">
+                <input type="checkbox" id="shadow-toggle-checkbox" checked onchange="toggleShadows(this.checked)">
+                Shadows
+              </label>
+              <div style="display:flex; gap:4px; margin-top:8px;">
+                <button class="transport-btn" style="flex:1;" onclick="addSectionPlane()" title="Adds a movable cutting plane that live-clips the model">Add Section Plane</button>
+                <button class="transport-btn" style="flex:1;" onclick="removeSectionPlane()">Remove</button>
+              </div>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:11px; color:#ccc; cursor:pointer;">
+                <input type="checkbox" id="section-plane-toggle" checked onchange="toggleSectionPlaneEnabled(this.checked)">
+                Section Plane Active
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:11px; color:#ccc; cursor:pointer;">
+                <input type="checkbox" id="xray-toggle" onchange="toggleXRay(this.checked)">
+                X-Ray Mode
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:11px; color:#ccc; cursor:pointer;">
+                <input type="checkbox" id="fog-toggle" onchange="toggleFog(this.checked)">
+                Fog
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:#ccc; cursor:pointer;" title="Real screen-space ambient occlusion — soft darkening in corners/contact points">
+                <input type="checkbox" id="ssao-toggle" onchange="toggleSSAO(this.checked)">
+                Ambient Occlusion (SSAO)
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:11px; color:#ccc; cursor:pointer;" title="Real bright-pass glow on overexposed highlights/light sources">
+                <input type="checkbox" id="bloom-toggle" onchange="toggleBloom(this.checked)">
+                Bloom
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:11px; color:#ccc; cursor:pointer;" title="Procedural sky-based image lighting — real ambient reflections on PBR materials, no external HDR file needed">
+                <input type="checkbox" id="hdri-toggle" onchange="toggleHdriEnvironment(this.checked)">
+                HDRI Environment (procedural sky)
+              </label>
+              <div class="prop-numeric-row" style="margin-top:8px;">
+                <span class="prop-label">Shadow Quality</span>
+                <select id="shadow-quality-select" style="flex:1; font-size:10px;" onchange="setShadowQuality(this.value)">
+                  <option value="LOW">Low (Fast)</option>
+                  <option value="MEDIUM" selected>Medium</option>
+                  <option value="HIGH">High (Sharp)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Lights</div>
+            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button class="transport-btn" onclick="createLight('point')" title="Bulb/candle-style light, all directions">Add Point Light</button>
+              <button class="transport-btn" onclick="createLight('spot')" title="Focused cone/torch-style light">Add Spot Light</button>
+              <button class="transport-btn" onclick="createLight('directional')" title="Parallel sun-like light covering the whole scene">Add Directional</button>
+              <button class="transport-btn" onclick="createLight('area')" title="Soft rectangular panel light">Add Area Light</button>
+            </div>
+          </div>
+
+          <div class="b-accordion-box" id="light-properties-box" style="display:none;">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Light Properties (selected)</div>
+            <div class="b-accordion-content">
+              <div class="prop-numeric-row"><span class="prop-label">Intensity</span><input type="number" id="light-intensity" step="10" style="flex:1;" oninput="updateSelectedLightParam('intensity', this.value)"></div>
+              <div class="prop-numeric-row"><span class="prop-label">Color</span><input type="color" id="light-color" oninput="updateSelectedLightParam('color', this.value)"></div>
+              <div class="prop-numeric-row" id="light-distance-row"><span class="prop-label">Distance</span><input type="number" id="light-distance" step="0.5" style="flex:1;" oninput="updateSelectedLightParam('distance', this.value)"></div>
+              <div class="prop-numeric-row" id="light-cone-angle-row"><span class="prop-label">Cone Angle</span><input type="number" id="light-cone-angle" step="1" style="flex:1;" oninput="updateSelectedLightParam('coneAngle', this.value)"></div>
+              <div class="prop-numeric-row" id="light-penumbra-row"><span class="prop-label">Penumbra</span><input type="range" id="light-penumbra" min="0" max="1" step="0.05" style="flex:1;" oninput="updateSelectedLightParam('penumbra', this.value)"></div>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:4px;"><input type="checkbox" id="light-cast-shadow" onchange="updateSelectedLightParam('castShadow', this.checked)"> Cast Shadow</label>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Day / Night (Sun)</div>
+            <div class="b-accordion-content">
+              <div class="prop-numeric-row">
+                <span class="prop-label">Time</span>
+                <input type="range" id="time-of-day-slider" min="0" max="24" step="0.25" value="12" style="flex:1;" oninput="setTimeOfDay(parseFloat(this.value)); document.getElementById('time-of-day-label').innerText = formatTimeOfDay(this.value);">
+                <span id="time-of-day-label" style="width:44px; text-align:right; font-size:10px; color:#999;">12:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Output</div>
+            <div class="b-accordion-content">
+              <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+                <label style="font-size:10.5px; color:#ccc; width:52px;">Width</label>
+                <input type="number" id="render-width" value="1280" min="64" max="4096" style="width:70px; background:#141414; border:1px solid #333; color:#fff; padding:2px;">
+                <label style="font-size:10.5px; color:#ccc; width:52px;">Height</label>
+                <input type="number" id="render-height" value="720" min="64" max="4096" style="width:70px; background:#141414; border:1px solid #333; color:#fff; padding:2px;">
+              </div>
+              <select id="render-resolution-preset" onchange="applyRenderResolutionPreset(this.value)" style="width:100%; background:#141414; border:1px solid #333; color:#fff; padding:3px; margin-bottom:8px;">
+                <option value="">Custom resolution</option>
+                <option value="1280x720">1280 × 720 (HD)</option>
+                <option value="1920x1080" selected>1920 × 1080 (Full HD)</option>
+                <option value="3840x2160">3840 × 2160 (4K)</option>
+                <option value="1024x1024">1024 × 1024 (Square)</option>
+              </select>
+
+              <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+                <label style="font-size:10.5px; color:#ccc; width:52px;">Start</label>
+                <input type="number" id="render-frame-start" value="1" min="1" max="250" style="width:60px; background:#141414; border:1px solid #333; color:#fff; padding:2px;">
+                <label style="font-size:10.5px; color:#ccc; width:40px;">End</label>
+                <input type="number" id="render-frame-end" value="50" min="1" max="250" style="width:60px; background:#141414; border:1px solid #333; color:#fff; padding:2px;">
+                <label style="font-size:10.5px; color:#ccc; width:30px;">FPS</label>
+                <input type="number" id="render-fps" value="24" min="1" max="60" style="width:45px; background:#141414; border:1px solid #333; color:#fff; padding:2px;">
+              </div>
+
+              <button onclick="renderStillImage()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Render Image</button>
+              <button onclick="renderAnimationVideo()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Animation (Video)</button>
+              <div id="render-progress" style="font-size:10px; color:var(--b-text-sub); margin-top:6px;"></div>
+            </div>
+          </div>
+
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ P2P Render Pool (LAN)</div>
+            <div class="b-accordion-content">
+              <div style="font-size:9.5px; color:var(--b-text-sub); margin-bottom:6px;">Open this app on other devices on your network and Join Pool there too — an image render then splits into strips across everyone connected.</div>
+              <div style="display:flex; gap:4px; margin-bottom:6px;">
+                <button class="transport-btn" style="flex:1;" onclick="joinRenderPool()">Join Pool</button>
+                <button class="transport-btn" style="flex:1;" onclick="leaveRenderPool()">Leave Pool</button>
+              </div>
+              <div id="render-pool-status" style="font-size:10px; color:#999; margin-bottom:6px;">Not connected</div>
+              <button onclick="renderImageWithPool()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Image (Pool)</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════ AUTOCAD-STYLE COMMAND LINE ═══════════════════════════════════ -->
+<div id="cad-command-bar" class="cad-command-bar">
+  <div id="cad-command-log" class="cad-command-log"></div>
+  <div class="cad-command-input-row">
+    <span class="cad-command-prompt">Command:</span>
+    <input id="cad-command-input" class="cad-command-input" type="text" autocomplete="off" spellcheck="false"
+      placeholder="Type a command (L=Line, M=Move, C=Circle, HELP=command list) and press Enter"
+      onkeydown="handleCadCommandKey(event)">
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════ (6) BOTTOM DOCK RAIL (empty by default — Timeline now lives as a Properties tab, see #tab-anim) ═══════════════════════════════════ -->
+<div id="dock-bottom" class="dock-rail dock-rail-h"></div>
+
+<!-- ═══════════════════════════ AI ASSISTANT — natural language → real tool calls ═══════════════════════════ -->
+<div id="ai-panel" class="dockable-panel" data-panel-id="ai-assistant" style="display:none; position:fixed; right:16px; bottom:16px; width:340px; max-height:440px; background:var(--b-bg-panel); border:1px solid var(--b-border-light); border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.5); z-index:600; flex-direction:column;">
+  <div class="dock-panel-header" style="padding:8px 10px;">
+    <strong style="font-size:11px;">⠿ AI Assistant</strong>
+    <button onclick="toggleAIPanel(false)" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:13px;">✕</button>
+  </div>
+  <div id="ai-log" style="flex:1; overflow-y:auto; padding:8px 10px; font-size:10.5px; display:flex; flex-direction:column; gap:6px; max-height:300px; min-height:120px;">
+    <div style="color:var(--b-text-muted);">Try: "add a red cube", "extrude the selected face by 1 meter", "make it gold and shiny".</div>
+  </div>
+  <div style="display:flex; gap:4px; padding:8px; border-top:1px solid var(--b-border-light);">
+    <input id="ai-prompt-input" type="text" placeholder="Describe what you want…" style="flex:1; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:5px 7px; border-radius:3px; font-size:10.5px;" onkeydown="if(event.key==='Enter') sendAICommand()">
+    <button class="transport-btn" onclick="sendAICommand()">Run</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ AI SETTINGS — provider + API key (stored server-side locally, never re-shown) ═══════════════════════════ -->
+<div id="ai-settings-panel" style="display:none; position:fixed; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:700; align-items:center; justify-content:center;">
+  <div style="background:var(--b-bg-panel); border:1px solid var(--b-border-light); border-radius:6px; width:360px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <strong style="font-size:12px;">AI Settings</strong>
+      <button onclick="toggleAISettingsPanel(false)" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:13px;">✕</button>
+    </div>
+    <div style="font-size:10px; color:var(--b-text-sub); margin-bottom:10px;" id="ai-settings-status">Loading…</div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <label style="font-size:10px; color:#aaa;">Provider
+        <select id="ai-provider-select" onchange="updateAIKeyHelpLink()" style="width:100%; margin-top:3px; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:5px; border-radius:3px;">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI</option>
+        </select>
+      </label>
+      <div id="ai-key-help-link" style="font-size:9.5px;"></div>
+      <label style="font-size:10px; color:#aaa;">API Key
+        <input id="ai-key-input" type="password" placeholder="Paste your API key" style="width:100%; margin-top:3px; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:5px; border-radius:3px; box-sizing:border-box;">
+      </label>
+      <div style="font-size:9px; color:var(--b-text-muted);">Stored in a local <code>ai_config.json</code> file next to server.py on this machine only — never sent anywhere except directly to the provider you pick.</div>
+      <div style="display:flex; gap:6px;">
+        <button class="transport-btn" style="flex:1;" onclick="testAIKey()">Test Key</button>
+        <button class="transport-btn btn-play" style="flex:1;" onclick="saveAISettings()">Save</button>
+      </div>
+      <div id="ai-key-test-result" style="font-size:9.5px; min-height:12px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ RIGHT-CLICK CONTEXT MENU — Add primitives ═══════════════════════════ -->
+<div id="context-menu" class="top-menu-dropdown" style="display:none; position:fixed; top:auto; left:auto;">
+  <div class="top-menu-dropdown-item" onclick="contextMenuAdd('cube')">Add Cube <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="contextMenuAdd('cylinder')">Add Cylinder <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="contextMenuAdd('uv_sphere')">Add UV Sphere <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="contextMenuAdd('ico_sphere')">Add Ico Sphere <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="contextMenuAdd('cone')">Add Cone <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="contextMenuAdd('torus')">Add Torus <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="contextMenuAdd('plane')">Add Plane <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-sep"></div>
+  <div class="top-menu-dropdown-item" id="context-menu-duplicate" onclick="toggleContextMenu(false); duplicateSelected();">Duplicate Selected <span class="kbd">Shift+D</span></div>
+  <div class="top-menu-dropdown-item" id="context-menu-delete" onclick="toggleContextMenu(false); deleteSelected();">Delete Selected <span class="kbd">X</span></div>
+  <div class="top-menu-dropdown-sep"></div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); groupSelectedObjects();" title="Ctrl/Shift-click objects in the Outliner first to select more than one">Group Selected <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); ungroupSelected();">Ungroup <span class="kbd"></span></div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); makeComponentFromSelection();">Make Component</div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); insertComponentInstance();">Insert Component Instance</div>
+  <div class="top-menu-dropdown-sep"></div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); convertToGuide();" title="Select a drawn Line first">Make Guide (dashed)</div>
+</div>
+
+<!-- ═══════════════════════════ INFO MODAL — Help ▸ Keyboard Shortcuts / About ═══════════════════════════ -->
+<!-- Asset Library — browses real, already-on-disk 3D models (the TexVerse-1K
+     GLB dataset from Hugging Face, scanned server-side) and imports the
+     actual file straight into the scene via GLTFLoader on click. No demo
+     data: if the folder is empty, the panel says so instead of pretending. -->
+<div id="asset-library-modal" style="display:none; position:fixed; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:750; align-items:center; justify-content:center;">
+  <div style="background:var(--b-bg-panel); border:1px solid var(--b-border-light); border-radius:6px; width:600px; max-height:75vh; display:flex; flex-direction:column; padding:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <div>
+        <strong style="font-size:12px;">Asset Library</strong>
+        <div id="asset-library-source" style="font-size:9.5px; color:var(--b-text-sub); margin-top:2px;"></div>
+      </div>
+      <button onclick="closeAssetLibrary()" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:13px;">✕</button>
+    </div>
+    <div id="asset-library-grid" style="overflow-y:auto; display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; padding-right:4px;"></div>
+  </div>
+</div>
+
+<div id="info-modal" style="display:none; position:fixed; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:750; align-items:center; justify-content:center;">
+  <div style="background:var(--b-bg-panel); border:1px solid var(--b-border-light); border-radius:6px; width:560px; max-height:78vh; overflow-y:auto; padding:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <strong id="info-modal-title" style="font-size:12px;">Info</strong>
+      <button onclick="document.getElementById('info-modal').style.display='none'" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:13px;">✕</button>
+    </div>
+    <div id="info-modal-body" style="font-size:10.5px; color:#ddd; line-height:1.7;"></div>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

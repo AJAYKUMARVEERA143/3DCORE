@@ -1,0 +1,1133 @@
+/* ==========================================================================
+   3D CORE STUDIO — HYBRID BLENDER 4.0 + SKETCHUP DESIGN SYSTEM
+   Pixel-perfect Blender Dark Theme with SketchUp Interactive Palette
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Blender Dark Surfaces */
+  --b-bg-darkest: #111111;
+  --b-bg-viewport: #181818;
+  --b-bg-panel: #262626;
+  --b-bg-panel-dark: #1e1e1e;
+  --b-bg-header: #2e2e2e;
+  --b-bg-input: #151515;
+  --b-bg-hover: #383838;
+  --b-bg-active: #474747;
+
+  --b-border: #141414;
+  --b-border-light: #383838;
+  --b-border-subtle: #2b2b2b;
+
+  /* Accents */
+  --b-orange: #e97426;
+  --b-orange-hover: #fa8231;
+  --b-blue-select: #4772b3;
+  --b-blue-active: #5680c2;
+  --b-green: #2ecc71;
+  --b-yellow: #f1c40f;
+  --b-red: #ea4335;
+
+  /* SketchUp Specific Inference Colors */
+  --su-red-axis: #ea4335;     /* X Axis / Red */
+  --su-green-axis: #34a853;   /* Y Axis / Green */
+  --su-blue-axis: #4285f4;    /* Z Axis / Blue */
+  --su-cyan-point: #00bcd4;   /* On Point / Endpoint */
+  --su-yellow-mid: #fbc02d;   /* Midpoint */
+  --su-magenta-tangent: #e91e63; /* Tangent / Perpendicular */
+
+  /* Text Colors */
+  --b-text: #e6e6e6;
+  --b-text-sub: #9e9e9e;
+  --b-text-muted: #666666;
+
+  /* Fonts */
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
+body {
+  background-color: var(--b-bg-darkest);
+  color: var(--b-text);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--b-bg-panel); }
+::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--b-orange); }
+
+/* ==========================================================================
+   GLOBAL FORM CONTROL DEFAULTS — every text/number input, select, and
+   checkbox in the app previously relied on a scattered per-instance inline
+   style="..." attribute for its dark-theme look; any input that never got
+   one (found via a live audit: the Polygon-sides and Pie-sweep-angle fields
+   in the toolbar, every checkbox in the Render panel) fell through to the
+   bare browser-default white box, a jarring flash of light-mode UI inside an
+   otherwise all-dark app. These element-level defaults make dark styling the
+   automatic baseline everywhere; an explicit inline style on a specific
+   input still wins by CSS specificity where one is intentionally set.
+   ========================================================================== */
+input[type="text"], input[type="number"], input[type="search"], input:not([type]), select, textarea {
+  background: var(--b-bg-input);
+  border: 1px solid var(--b-border-light);
+  color: var(--b-text);
+  border-radius: 3px;
+  padding: 3px 5px;
+}
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, input:not([type]):focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--b-blue-select);
+}
+input[type="text"]:disabled, input[type="number"]:disabled, select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+select { cursor: pointer; }
+
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  background: var(--b-bg-input);
+  border: 1px solid var(--b-border-light);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+input[type="checkbox"]:hover { border-color: var(--b-blue-select); }
+input[type="checkbox"]:checked {
+  background: var(--b-blue-select);
+  border-color: var(--b-blue-active);
+}
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px; top: 0px;
+  width: 3px; height: 6px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: var(--b-border-light);
+  border-radius: 2px;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--b-blue-select);
+  border: 1px solid var(--b-blue-active);
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb:hover { background: var(--b-blue-active); }
+
+/* ==========================================================================
+   1. TOP APPLICATION HEADER (Blender Style Menubar + Workspace Tabs)
+   ========================================================================== */
+.blender-top-header {
+  height: 30px;
+  background: var(--b-bg-header);
+  border-bottom: 1px solid var(--b-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.top-header-left {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.blender-icon-logo {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  cursor: pointer;
+}
+
+.top-menu-item {
+  padding: 3px 8px;
+  color: var(--b-text);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.1s;
+}
+.top-menu-item:hover { background: var(--b-bg-hover); }
+.top-menu-item { position: relative; }
+
+.top-menu-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 190px;
+  background: var(--b-bg-panel);
+  border: 1px solid var(--b-border-light);
+  border-radius: 4px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+  padding: 4px;
+  z-index: 500;
+}
+.top-menu-item.open .top-menu-dropdown { display: block; }
+
+.top-menu-dropdown-item {
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--b-text);
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.top-menu-dropdown-item:hover { background: var(--b-orange); color: #111; }
+.top-menu-dropdown-item.disabled { color: var(--b-text-muted); pointer-events: none; }
+.top-menu-dropdown-item .kbd { color: var(--b-text-sub); font-size: 9.5px; }
+.top-menu-dropdown-item:hover .kbd { color: #111; }
+.top-menu-dropdown-sep { height: 1px; background: var(--b-border-light); margin: 4px 2px; }
+
+/* Workspace Tabs */
+.workspace-tabs-strip {
+  display: flex;
+  align-items: center;
+  background: var(--b-bg-darkest);
+  padding: 2px;
+  border-radius: 4px;
+  margin-left: 10px;
+  gap: 1px;
+}
+
+.ws-tab-chip {
+  padding: 2.5px 9px;
+  color: var(--b-text-sub);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.12s;
+}
+.ws-tab-chip:hover { color: #fff; background: #252525; }
+.ws-tab-chip.active {
+  background: #3e3e3e;
+  color: #fff;
+  font-weight: 600;
+}
+
+.top-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ==========================================================================
+   2. VIEWPORT TOP TOOLBAR & QUICK PALETTE
+   ========================================================================== */
+.viewport-top-toolbar {
+  height: 28px;
+  background: var(--b-bg-panel-dark);
+  border-bottom: 1px solid var(--b-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  z-index: 90;
+  flex-shrink: 0;
+}
+
+.v-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-pill-dropdown {
+  background: var(--b-bg-darkest);
+  border: 1px solid var(--b-border-light);
+  color: var(--b-orange);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10.5px;
+}
+
+.mesh-select-icons {
+  display: flex;
+  align-items: center;
+  background: var(--b-bg-darkest);
+  border: 1px solid var(--b-border-light);
+  border-radius: 3px;
+  padding: 1px;
+  gap: 1px;
+}
+.mesh-sel-btn {
+  padding: 1px 6px;
+  color: var(--b-text-sub);
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 10px;
+}
+.mesh-sel-btn:hover { color: #fff; background: #333; }
+.mesh-sel-btn.active { background: #444; color: #fff; font-weight: 700; }
+
+.v-sub-menu {
+  display: flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+.v-sub-item {
+  padding: 2px 6px;
+  color: var(--b-text);
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 10.5px;
+}
+.v-sub-item:hover { background: var(--b-bg-hover); }
+
+/* Shading Spheres */
+.shading-spheres-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--b-bg-darkest);
+  padding: 2px 6px;
+  border-radius: 14px;
+  border: 1px solid var(--b-border);
+}
+
+.shading-sphere {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid #444;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.shading-sphere:hover { transform: scale(1.15); }
+.shading-sphere.active {
+  border-color: var(--b-orange);
+  box-shadow: 0 0 6px rgba(233, 116, 38, 0.8);
+}
+.sphere-wire { background: radial-gradient(circle, #222 35%, #777 100%); }
+.sphere-solid { background: radial-gradient(circle, #aaa 30%, #555 100%); }
+.sphere-mat { background: radial-gradient(circle, #3b82f6 30%, #1e40af 100%); }
+.sphere-render { background: radial-gradient(circle, #e97426 30%, #c2410c 100%); }
+
+/* ==========================================================================
+   3. MAIN WORKSPACE BODY & SKETCHUP FLOATING TOOL PALETTE
+   ========================================================================== */
+.blender-main-stage {
+  flex: 1;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+  background: var(--b-bg-viewport);
+}
+
+/* SketchUp "Getting Started" Floating Tool Palette */
+.sketchup-getting-started-dock {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(34, 34, 34, 0.95);
+  border: 1px solid var(--b-border-light);
+  border-radius: 6px;
+  padding: 4px 3px;
+  gap: 2px;
+  z-index: 40;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+}
+/* Two columns side by side (SketchUp-style compact toolbar) instead of one
+   long single-file column — the button/input list is a flat run of direct
+   children, so grid-auto-flow just fills left-to-right, top-to-bottom
+   automatically; dividers/header opt out via grid-column below so they
+   still read as full-width group separators. Combined-class selector so
+   this reliably beats the generic .dockable-panel{display:flex} rule
+   regardless of stylesheet order (equal single-class specificity would
+   otherwise let source order decide, which is what broke this the first
+   time — the generic rule happened to come later). */
+.sketchup-getting-started-dock.dockable-panel {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-auto-flow: row;
+  align-items: center;
+  justify-items: center;
+}
+
+.sketchup-getting-started-dock > .dock-panel-header {
+  grid-column: 1 / -1;
+}
+
+/* Docked to the top/bottom edge, the panel becomes a wide, short strip —
+   the vertical layout above (2 fixed-width columns, rows growing downward)
+   previously stayed active regardless, so 27+ buttons stacked into two
+   columns far taller than the strip, clipped almost entirely out of view.
+   Flow across instead: fixed-height rows, columns growing sideways, with
+   a horizontal scrollbar as the overflow escape hatch instead of vertical
+   clipping. The header/dividers switch from a full-width top bar to a
+   full-height left bar to match. */
+.sketchup-getting-started-dock.dockable-panel.docked-top,
+.sketchup-getting-started-dock.dockable-panel.docked-bottom {
+  grid-template-columns: none;
+  grid-template-rows: repeat(2, 34px);
+  grid-auto-flow: column;
+  grid-auto-columns: 34px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.sketchup-getting-started-dock.dockable-panel.docked-top > .dock-panel-header,
+.sketchup-getting-started-dock.dockable-panel.docked-bottom > .dock-panel-header {
+  grid-row: 1 / -1;
+  grid-column: auto;
+  width: auto;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  border-radius: 5px 0 0 5px !important;
+  margin: -4px 2px -4px -3px !important;
+}
+.sketchup-getting-started-dock.dockable-panel.docked-top > .su-tool-sep,
+.sketchup-getting-started-dock.dockable-panel.docked-bottom > .su-tool-sep {
+  grid-row: 1 / -1;
+  grid-column: auto;
+  width: 1px;
+  height: 100%;
+  margin: 0 4px;
+}
+
+.su-dock-header {
+  grid-column: 1 / -1;
+  font-size: 8px;
+  font-weight: 800;
+  color: var(--b-text-muted);
+  letter-spacing: 0.5px;
+  margin: 2px 0;
+  text-transform: uppercase;
+}
+
+.su-tool-sep {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 1px;
+  background: #383838;
+  margin: 3px 0;
+}
+
+.su-palette-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--b-text-sub);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+  position: relative;
+}
+.su-palette-btn svg { width: 17px; height: 17px; fill: currentColor; }
+.su-palette-btn:hover {
+  background: var(--b-bg-hover);
+  color: #fff;
+}
+.su-palette-btn.active {
+  background: var(--b-blue-select);
+  color: #fff;
+  border-color: #2b569a;
+  box-shadow: 0 0 8px rgba(71, 114, 179, 0.5);
+}
+
+/* Tooltip on hover */
+.su-palette-btn[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  left: 42px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(18, 18, 18, 0.95);
+  border: 1px solid var(--b-border-light);
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+}
+
+/* 3D Viewport Area */
+.blender-viewport-area {
+  flex: 1;
+  position: relative;
+  background: var(--b-bg-viewport);
+  overflow: hidden;
+}
+
+#viewport-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#su-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* Viewport HUD Text */
+.viewport-hud-text {
+  position: absolute;
+  top: 12px;
+  left: 58px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: #bbb;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
+.hud-persp-title { font-weight: 700; color: #fff; }
+.hud-collection-info { color: var(--b-text-sub); }
+
+/* Inference tooltip — AutoCAD/SketchUp-style "On Vertex" / "On Red Axis" hint
+   that follows the cursor while a draw tool is active and something snappable
+   is under it. Positioned in JS via left/top; color set per snap type. */
+.inference-tooltip {
+  position: absolute;
+  z-index: 40;
+  display: none;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #111;
+  background: #ffcc00;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  transform: translate(14px, 14px);
+}
+
+/* Navigation Bubble Gizmo (Top Right) */
+.viewport-nav-bubble-gizmo {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 30;
+}
+
+/* AutoCAD-style ViewCube — a real 3D cube (rendered into its own small
+   scene/camera by initViewCube()/renderViewCube() in app.js) sitting inside
+   a flat compass ring, replacing the old flat colored-dot ring. */
+.viewcube-canvas {
+  width: 88px;
+  height: 88px;
+  cursor: pointer;
+}
+
+.viewcube-wrap {
+  position: relative;
+  width: 88px;
+  height: 88px;
+}
+.viewcube-home-btn {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: rgba(36, 36, 36, 0.9);
+  border: 1px solid var(--b-border-light);
+  color: #ccc;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  padding: 0;
+}
+.viewcube-home-btn:hover { background: #444; color: #fff; }
+.viewcube-rotate-btn {
+  position: absolute;
+  top: -3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  padding: 0;
+}
+.viewcube-rotate-btn:hover { color: #fff; }
+.viewcube-rotate-left { left: 16px; }
+.viewcube-rotate-right { right: 16px; }
+
+/* AutoCAD-style command line — a real command bar, not decoration: typing
+   a command name/alias and pressing Enter dispatches it via
+   dispatchCadCommand() onto this app's real functions. */
+.cad-command-bar {
+  background: #0d0d0d;
+  border-top: 1px solid var(--b-border-light);
+  border-bottom: 1px solid var(--b-border-light);
+  padding: 3px 8px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.cad-command-log {
+  max-height: 48px;
+  overflow-y: auto;
+  color: #8a8a8a;
+  line-height: 1.5;
+  margin-bottom: 2px;
+}
+.cad-command-log .cad-log-echo { color: #6fa8ff; }
+.cad-command-log .cad-log-error { color: #ff7a7a; }
+.cad-command-log .cad-log-ok { color: #7adf7a; }
+.cad-command-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cad-command-prompt {
+  color: #999;
+  white-space: nowrap;
+}
+.cad-command-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #eee;
+  font-family: inherit;
+  font-size: 11px;
+}
+.cad-command-input::placeholder { color: #555; }
+
+/* Material Library — category tabs + a grid of swatches, each with a real
+   rotating 3D preview (canvas) rendered by the shared thumbnail system in
+   app.js, not a static color chip. */
+.mat-library-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+.mat-library-tab {
+  font-size: 9.5px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: #1c1c1c;
+  border: 1px solid var(--b-border-light);
+  color: #aaa;
+  cursor: pointer;
+}
+.mat-library-tab:hover { background: #2a2a2a; color: #ddd; }
+.mat-library-tab.active { background: var(--b-orange); color: #1a1a1a; border-color: var(--b-orange); font-weight: 700; }
+
+.mat-library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.mat-swatch-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: grab;
+  padding: 3px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+.mat-swatch-card:hover { border-color: var(--b-border-light); background: #1c1c1c; }
+.mat-swatch-canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: #141414;
+}
+.mat-swatch-name {
+  font-size: 8.5px;
+  color: #bbb;
+  text-align: center;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-gizmo-mini-btn {
+  width: 24px;
+  height: 24px;
+  background: rgba(36, 36, 36, 0.9);
+  border: 1px solid var(--b-border-light);
+  border-radius: 3px;
+  color: #ccc;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.nav-gizmo-mini-btn:hover { background: #444; color: #fff; }
+
+/* ==========================================================================
+   4. RIGHT DOCK: OUTLINER + PROPERTIES
+   ========================================================================== */
+#dock-right {
+  background: var(--b-bg-panel);
+  border-left: 1px solid var(--b-border);
+  z-index: 50;
+}
+#dock-right .dockable-panel { border-left: none; }
+
+/* ==========================================================================
+   DOCKABLE PANEL SYSTEM — drag any panel's header to float it anywhere, or
+   drop it on a screen edge to dock there. Layout persists (localStorage).
+   ========================================================================== */
+.dock-rail {
+  flex-shrink: 0;
+  /* visible, not hidden — a docked panel's own popups/dropdowns (e.g. the
+     Timeline's Playback/Keying/View/Marker menus) need to render outside
+     this rail's box; the panel's .dock-panel-body handles its own
+     internal scrolling separately. */
+  overflow: visible;
+  display: flex;
+}
+.dock-rail-v { flex-direction: column; }
+.dock-rail-h { flex-direction: row; }
+.dock-rail:empty { width: 0 !important; height: 0 !important; min-width: 0; min-height: 0; border: none !important; }
+
+.dockable-panel {
+  display: flex;
+  flex-direction: column;
+  /* visible — popups launched from inside (e.g. Timeline's menu dropdowns)
+     must be able to render outside this box; .dock-panel-body below is
+     what actually clips/scrolls the panel's normal content. */
+  overflow: visible;
+  background: var(--b-bg-panel);
+  position: relative; /* anchors .dock-resize-handle while docked (not floating/fixed) */
+}
+
+/* Drag-to-resize handle on the inner edge of a DOCKED panel (floating
+   panels already get a native corner resize handle via CSS `resize`). */
+.dock-resize-handle { position: absolute; z-index: 30; background: transparent; }
+.dock-resize-handle:hover { background: rgba(71,114,179,0.35); }
+.docked-right > .dock-resize-handle { left: -3px; top: 0; width: 6px; height: 100%; cursor: ew-resize; }
+.docked-left > .dock-resize-handle  { right: -3px; top: 0; width: 6px; height: 100%; cursor: ew-resize; }
+.docked-bottom > .dock-resize-handle { top: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; }
+.docked-top > .dock-resize-handle    { bottom: -3px; left: 0; width: 100%; height: 6px; cursor: ns-resize; }
+.floating > .dock-resize-handle { display: none; } /* floating panels resize via the native CSS `resize` corner handle instead */
+#dock-right > .dockable-panel, #dock-left > .dockable-panel { width: 320px; height: 100%; }
+#dock-top > .dockable-panel, #dock-bottom > .dockable-panel { height: 38px; width: 100%; }
+
+.dockable-panel.floating {
+  position: fixed;
+  z-index: 550;
+  border: 1px solid var(--b-border-light);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+  resize: both;
+  min-width: 160px;
+  min-height: 90px;
+}
+
+.dock-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: grab;
+  background: var(--b-bg-header);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--b-text-sub);
+  border-bottom: 1px solid var(--b-border);
+  flex-shrink: 0;
+  touch-action: none;
+}
+.dock-panel-header:active { cursor: grabbing; }
+.dock-panel-body { flex: 1; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+
+/* Outliner Editor */
+.outliner-box {
+  height: 38%;
+  border-bottom: 1px solid var(--b-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.outliner-topbar {
+  height: 26px;
+  background: var(--b-bg-header);
+  border-bottom: 1px solid var(--b-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
+.outliner-search-input {
+  background: var(--b-bg-darkest);
+  border: 1px solid var(--b-border-subtle);
+  color: var(--b-text);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  width: 140px;
+}
+
+.outliner-tree-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 6px;
+  border-radius: 2px;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.tree-row:hover { background: #353535; }
+.tree-row.selected {
+  background: var(--b-blue-select);
+  color: #fff;
+  font-weight: 600;
+}
+.tree-row-left { display: flex; align-items: center; gap: 6px; }
+.tree-row-right { display: flex; align-items: center; gap: 6px; color: var(--b-text-sub); }
+
+/* Properties Editor */
+.properties-editor-box {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.properties-vertical-strip {
+  width: 32px;
+  background: var(--b-bg-panel-dark);
+  border-right: 1px solid var(--b-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.p-strip-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--b-text-sub);
+  font-size: 11px;
+}
+.p-strip-btn:hover { color: #fff; background: var(--b-bg-hover); }
+.p-strip-btn.active {
+  background: var(--b-blue-select);
+  color: #fff;
+  font-weight: 700;
+}
+
+.properties-body-scroll {
+  flex: 1;
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Accordion Box */
+.b-accordion-box {
+  background: #252525;
+  border: 1px solid var(--b-border-subtle);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.b-accordion-header {
+  background: #2f2f2f;
+  padding: 4px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.b-accordion-content {
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prop-numeric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  gap: 4px;
+}
+.prop-label { color: var(--b-text-sub); width: 60px; }
+
+.xyz-num-inputs {
+  flex: 1;
+  display: flex;
+  gap: 2px;
+}
+.xyz-input-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: var(--b-bg-input);
+  border: 1px solid var(--b-border);
+  border-radius: 2px;
+  padding: 1px 3px;
+}
+.xyz-tag { font-size: 9px; font-weight: 800; margin-right: 2px; }
+.tag-x { color: #e74c3c; }
+.tag-y { color: #2ecc71; }
+.tag-z { color: #3498db; }
+.xyz-input-wrap input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  outline: none;
+  text-align: right;
+}
+
+/* ==========================================================================
+   5. SKETCHUP MEASUREMENTS & INFERENCE STATUS BOX (BOTTOM RIGHT OF VIEWPORT)
+   ========================================================================== */
+.sketchup-measurement-vcb-box {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  background: rgba(22, 22, 22, 0.94);
+  border: 1px solid var(--b-border-light);
+  border-radius: 4px;
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 40;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+  backdrop-filter: blur(6px);
+}
+.vcb-label { font-size: 10px; color: var(--b-text-sub); }
+.vcb-value {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--b-green);
+  font-family: var(--font-mono);
+  min-width: 80px;
+  text-align: right;
+}
+
+/* ==========================================================================
+   6. BOTTOM TIMELINE (Playback + Keying + Frame Scrubber)
+   ========================================================================== */
+.blender-bottom-timeline {
+  height: 38px;
+  background: var(--b-bg-panel-dark);
+  border-top: 1px solid var(--b-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  z-index: 60;
+  flex-shrink: 0;
+}
+
+.timeline-left-menus {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.t-menu-label {
+  padding: 2px 5px;
+  color: var(--b-text);
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 10.5px;
+}
+.t-menu-label:hover { background: #333; }
+
+.timeline-transport-btns {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.transport-btn {
+  background: var(--b-bg-panel);
+  border: 1px solid var(--b-border-subtle);
+  color: var(--b-text);
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10.5px;
+}
+.transport-btn:hover { background: #3c3c3c; color: #fff; }
+.transport-btn.btn-play { background: var(--b-blue-select); color: #fff; font-weight: 700; }
+
+.sculpt-brush-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+}
+.sculpt-brush-btn {
+  background: var(--b-bg-panel);
+  border: 1px solid var(--b-border-subtle);
+  color: var(--b-text-sub);
+  padding: 4px 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sculpt-brush-btn:hover { background: var(--b-bg-hover); color: #fff; }
+.sculpt-brush-btn.active { background: var(--b-blue-select); color: #fff; border-color: var(--b-blue-active); font-weight: 600; }
+
+.timeline-canvas-frame-area {
+  flex: 1;
+  position: relative;
+  margin: 0 10px;
+  height: 28px;
+}
+
+#dope-canvas {
+  width: 100%;
+  height: 100%;
+  background: #141414;
+  border-radius: 3px;
+  border: 1px solid var(--b-border);
+  display: block;
+}
+
+#anim-scrubber {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: col-resize;
+}
+
+.timeline-frame-boxes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+.frame-box-num {
+  background: var(--b-bg-darkest);
+  border: 1px solid var(--b-border-subtle);
+  color: var(--b-blue-active);
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+/* Touch-first compact workspace: keep the viewport and essential controls on
+   tablets/phones instead of shrinking a desktop editor into unusable panels. */
+@media (max-width: 900px) {
+  .top-header-right, .viewport-top-toolbar, #dock-right, #dock-left, #dock-top,
+  #dock-bottom { display: none; }
+  .blender-top-header { height: 38px; overflow-x: auto; padding: 0 4px; }
+  .top-header-left { min-width: max-content; }
+  .top-menu-item { display: none; }
+  .workspace-tabs-strip { overflow: visible; }
+  .blender-main-stage { min-height: 0; }
+  .sketchup-getting-started-dock { top: 8px; left: 8px; transform: scale(.9); transform-origin: top left; }
+  .viewport-hud-text { top: 8px; left: 50px; }
+  .sketchup-measurement-vcb-box { bottom: 8px; right: 8px; }
+}

@@ -1,0 +1,15 @@
+ai_config.json
+__pycache__/
+*.pyc
+
+# Blender source checkout kept only as a local design reference (see
+# docs/ROADMAP.md "Product boundary") -- not part of the shipped app, and
+# far too large (20k+ files) to belong in this repo.
+reference/
+
+# Downloaded dataset, not project source -- ~20GB and has its own separate
+# git history from wherever it was cloned. Re-fetch via download_datasets.py.
+assets/DeepFurniture/
+
+# Local Claude Code session state (process id/timestamps), not project content.
+.claude/*.lock
