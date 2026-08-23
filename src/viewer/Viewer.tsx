@@ -3,7 +3,11 @@ import { Canvas } from '@react-three/fiber'
 import { Grid, OrbitControls } from '@react-three/drei'
 import { RoomBlock } from './RoomBlock'
 
-export function Viewer() {
+type ViewerProps = {
+  roomSize: [number, number, number]
+}
+
+export function Viewer({ roomSize }: ViewerProps) {
   return (
     <Canvas shadows camera={{ position: [6, 6, 8], fov: 50 }}>
       <Suspense fallback={null}>
@@ -26,7 +30,7 @@ export function Viewer() {
           infiniteGrid
         />
 
-        <RoomBlock position={[0, 0, 0]} size={[4, 2.6, 5]} />
+        <RoomBlock position={[0, 0, 0]} size={roomSize} />
 
         <OrbitControls makeDefault minDistance={2} maxDistance={40} />
       </Suspense>
