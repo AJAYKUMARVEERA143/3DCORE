@@ -31,6 +31,20 @@ let gridSnapOn = true;
 let gridSnapStep = 1;
 let transformSpace = 'world'; // 'world' | 'local'
 let groundGrid = null;
+let axisHelpers = [];
+let renderQualityName = 'balanced';
+let sceneDirty = true;
+let lastGpuDrawMs = 0;
+let lastCamState = null;
+let userShadowPref = true;
+let presentMode = false;
+let presentSlides = [];
+let presentIndex = 0;
+let presentPlaying = false;
+let presentPlayRaf = 0;
+let presentSavedQuality = null;
+let presentLerp = null;
+function markSceneDirty() { sceneDirty = true; }
 
 function snapScalar(n, size) {
     if (!size) return n;
@@ -185,6 +199,7 @@ function initApp() {
     orbitControls.dampingFactor = 0.08;
     orbitControls.zoomSpeed     = 1.2;
     orbitControls.screenSpacePanning = true;
+    orbitControls.addEventListener('change', markSceneDirty);
 
     // TransformControls — Blender-style gizmo
     transformControls = new THREE.TransformControls(camera, renderer.domElement);
@@ -268,6 +283,7 @@ function initApp() {
         new THREE.LineBasicMaterial({ color: 0x44cc44 })
     );
     scene.add(yLine);
+    axisHelpers = [xLine, yLine];
 
     buildDefaultBlenderScene();
 
@@ -300,6 +316,14 @@ function initApp() {
     document.querySelectorAll('.units-quick-select').forEach(el => { el.value = appUnits; });
     refreshSnapChip();
     tryAutoRestoreSession();
+    const qSel = document.getElementById('quality-select');
+    if (qSel) qSel.value = renderQualityName;
+    applyRenderQuality(renderQualityName);
+    document.addEventListener('visibilitychange', markSceneDirty);
+    if (renderer && renderer.domElement) {
+        renderer.domElement.addEventListener('pointerdown', markSceneDirty);
+        renderer.domElement.addEventListener('wheel', markSceneDirty, { passive: true });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -325,9 +349,41 @@ function renderLoop() {
         document.getElementById('frame-display').innerText = animFrame;
         applyAnimationAtFrame(animFrame);
         drawDopeSheet();
+        markSceneDirty();
     }
 
-    if (composer && (ssaoEnabled || bloomEnabled)) composer.render();
+    if (presentLerp) {
+        stepPresentLerp(now);
+        markSceneDirty();
+    }
+
+    const RQ = window.RenderQuality;
+    const preset = (RQ && RQ.PRESETS[renderQualityName]) || { fps: 60 };
+    const camState = camera.position.toArray().concat(orbitControls.target.toArray(), [camera.fov]);
+    const cameraMoved = RQ ? RQ.cameraChanged(lastCamState, camState) : true;
+    const walkMoving = !!(typeof walkModeActive !== 'undefined' && walkModeActive && _walkKeysDown && _walkKeysDown.size);
+    const needDraw = RQ
+        ? RQ.shouldRenderFrame({
+            documentHidden: document.hidden,
+            dirty: sceneDirty || !!(transformControls && transformControls.dragging),
+            cameraMoved,
+            animationPlaying: isAnimPlaying,
+            walkMoving,
+            presentPlaying: presentPlaying || !!presentLerp,
+            fpsCap: preset.fps,
+            lastDrawMs: lastGpuDrawMs,
+            nowMs: now,
+        })
+        : true;
+    if (!needDraw) {
+        if (vcRenderer && !presentMode) renderViewCube();
+        return;
+    }
+    lastCamState = camState;
+    lastGpuDrawMs = now;
+    sceneDirty = false;
+
+    if (composer && (ssaoEnabled || bloomEnabled) && !presentMode) composer.render();
     else renderer.render(scene, camera);
 }
 
@@ -3007,6 +3063,10 @@ function setupKeyboard() {
         // focus was still sitting in some other field, leaving a Line/
         // Wall/Poly Build path stuck mid-draw with no way to cancel it
         // from the keyboard.
+        if (e.key === 'Escape' && presentMode && !sketchState) {
+            exitPresentMode();
+            return;
+        }
         if (e.key === 'Escape' && sketchState) {
             if (document.activeElement && document.activeElement !== document.body && typeof document.activeElement.blur === 'function') {
                 document.activeElement.blur();
@@ -3154,10 +3214,21 @@ function setupKeyboard() {
             case '3': setViewAngle('right'); break;
             case '5': toggleOrtho();         break;
 
-            // Animation
+            // Animation / Present slideshow
             case ' ':
                 e.preventDefault();
-                togglePlay();
+                if (presentMode) togglePresentPlayback();
+                else togglePlay();
+                break;
+            case 'ArrowRight':
+                if (presentMode) { e.preventDefault(); gotoPresentSlide(presentIndex + 1); }
+                break;
+            case 'ArrowLeft':
+                if (presentMode) { e.preventDefault(); gotoPresentSlide(presentIndex - 1); }
+                break;
+            case 'F5':
+                e.preventDefault();
+                togglePresentMode();
                 break;
             case 'i': case 'I': insertKeyframe(); break;
 
@@ -3268,10 +3339,14 @@ function setShadingMode(mode) {
 // the renderer flag alone doesn't recompile anything already-rendered, so
 // every material must be flagged for a program rebuild too, or the toggle
 // silently does nothing until something else forces a recompile.
-function toggleShadows(enabled) {
-    renderer.shadowMap.enabled = enabled;
+function toggleShadows(enabled, fromQuality) {
+    if (!fromQuality) userShadowPref = !!enabled;
+    renderer.shadowMap.enabled = !!enabled;
     scene.traverse(obj => { if (obj.isMesh && obj.material) obj.material.needsUpdate = true; });
+    const box = document.getElementById('shadow-toggle-checkbox');
+    if (box && box.checked !== !!enabled) box.checked = !!enabled;
     setVCB('Render:', enabled ? 'Shadows On' : 'Shadows Off');
+    markSceneDirty();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3341,12 +3416,14 @@ function toggleSSAO(enabled) {
     ssaoEnabled = enabled;
     if (ssaoPass) ssaoPass.enabled = enabled;
     setVCB('SSAO:', enabled ? 'On' : 'Off');
+    markSceneDirty();
 }
 
 function toggleBloom(enabled) {
     bloomEnabled = enabled;
     if (bloomPass) bloomPass.enabled = enabled;
     setVCB('Bloom:', enabled ? 'On' : 'Off');
+    markSceneDirty();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3681,18 +3758,42 @@ function triggerDownload(url, filename) {
     document.body.removeChild(a);
 }
 
+function getStillSupersample() {
+    const el = document.getElementById('render-supersample');
+    const n = el ? parseInt(el.value, 10) : 1;
+    return (n === 2 || n === 4) ? n : 1;
+}
+
+function captureStillDataUrl(w, h) {
+    const RQ = window.RenderQuality;
+    const ss = getStillSupersample();
+    const size = RQ ? RQ.downsampleSize(w, h, ss, 8192) : { renderW: w, renderH: h, outW: w, outH: h };
+    let dataUrl = '';
+    withPresentationHelpersHidden(() => {
+        withRenderResolution(size.renderW, size.renderH, () => {
+            renderer.render(scene, camera);
+            if (size.renderW === size.outW && size.renderH === size.outH) {
+                dataUrl = renderer.domElement.toDataURL('image/png');
+                return;
+            }
+            const src = renderer.domElement;
+            const out = document.createElement('canvas');
+            out.width = size.outW;
+            out.height = size.outH;
+            const ctx = out.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(src, 0, 0, size.outW, size.outH);
+            dataUrl = out.toDataURL('image/png');
+        });
+    });
+    return dataUrl;
+}
+
 function renderStillImage() {
     const { w, h } = getRenderResolution();
-    withRenderResolution(w, h, () => {
-        // Must render synchronously right here, immediately before the
-        // capture — this canvas has no preserveDrawingBuffer, so a read
-        // any time after control returns to the event loop can capture a
-        // stale/cleared buffer instead of this frame (bit this project
-        // once already, on the Asset Library thumbnail renderer).
-        renderer.render(scene, camera);
-        const dataUrl = renderer.domElement.toDataURL('image/png');
-        triggerDownload(dataUrl, `3DCore_Render_${w}x${h}.png`);
-    });
+    const dataUrl = captureStillDataUrl(w, h);
+    triggerDownload(dataUrl, `3DCore_Render_${w}x${h}.png`);
     setVCB('Render:', `Image ${w}×${h} rendered`);
 }
 
@@ -4149,7 +4250,7 @@ function initViewCube() {
     if (!vcCanvas || typeof camera === 'undefined' || !camera) return;
 
     vcRenderer = new THREE.WebGLRenderer({ canvas: vcCanvas, alpha: true, antialias: true });
-    vcRenderer.setPixelRatio(window.devicePixelRatio || 1);
+    vcRenderer.setPixelRatio(1);
     vcRenderer.setSize(vcCanvas.clientWidth || 88, vcCanvas.clientHeight || 88, false);
     vcRenderer.setClearColor(0x000000, 0);
 
@@ -4572,6 +4673,10 @@ const CAD_COMMANDS = {
     IMPORT: () => triggerImportGLB(),
     ASSETS: () => openAssetLibrary(), LIBRARY: () => openAssetLibrary(),
 
+    PRESENT: () => enterPresentMode(), PRES: () => enterPresentMode(),
+    QUALITY: (arg) => applyRenderQuality((arg || 'balanced').toLowerCase()),
+    SLIDE: () => addPresentSlide(),
+
     HELP: () => openHelpDesk(), H: () => openHelpDesk(), '?': () => openHelpDesk(),
 };
 
@@ -4637,6 +4742,7 @@ function switchWS(el, ws) {
         anim:     () => { switchInteractionMode('object');   switchRightTab('anim'); },
         shade:    () => { switchInteractionMode('object');   switchRightTab('mat'); },
         render:   () => { switchInteractionMode('object');   switchRightTab('render'); setShadingMode('RAYTRACE'); },
+        present:  () => { enterPresentMode(); },
         bim:      () => { switchInteractionMode('object');   switchRightTab('object'); },
     };
 
@@ -8170,6 +8276,9 @@ function newScene() {
     renderLayersPanel();
     populateLayerSelect();
     sunLight = null; // see ensureSunLight() — buildDefaultBlenderScene() just removed every previous scene object including any Sun
+    presentSlides = [];
+    presentIndex = 0;
+    refreshPresentSlideSelect();
     scheduleAutosave(); // overwrite the autosave slot so a refresh doesn't resurrect the old scene
     setVCB('New Scene', 'Default Blender startup');
 }
@@ -8258,6 +8367,8 @@ function sceneToJSON() {
                 scale: [k.scale.x, k.scale.y, k.scale.z],
             }))])
         ),
+        presentSlides,
+        renderQualityName,
     };
 }
 
@@ -8315,6 +8426,11 @@ function loadSceneFromJSON(data) {
 
     undoStack.length = 0;
     redoStack.length = 0;
+
+    presentSlides = Array.isArray(data.presentSlides) ? data.presentSlides : [];
+    presentIndex = 0;
+    refreshPresentSlideSelect();
+    if (data.renderQualityName) applyRenderQuality(data.renderQualityName);
 
     renderOutliner();
     selectObject(null);
@@ -9571,6 +9687,7 @@ function showKeyboardShortcuts() {
             <b>Space</b><span>Play / Pause</span>
             <b>Numpad 1 / 3 / 7 / 5</b><span>Front / Right / Top / toggle Ortho</span>
             <b>Shift+D</b><span>Duplicate</span>
+            <b>F5</b><span>Present mode (fullscreen client view)</span>
             <b>F12</b><span>Render (Rendered shading)</span>
             <b>Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y</b><span>Undo / Redo</span>
             <b>Ctrl+S / Ctrl+O</b><span>Save / Open Project</span>
@@ -9649,5 +9766,322 @@ function showAboutDialog() {
 // MISC HELPERS
 // ─────────────────────────────────────────────────────────────
 function setShadingModeFromDropdown(val) { setShadingMode(val); }
+
+
+// ─────────────────────────────────────────────────────────────
+// QUALITY LADDER + PRESENT MODE
+// Draft / Balanced / Present change real renderer knobs.
+// Present hides modeling chrome, stores camera slides, exports PNG/WebM.
+// ─────────────────────────────────────────────────────────────
+function applyRenderQuality(name) {
+    const RQ = window.RenderQuality;
+    if (!RQ) return;
+    const preset = RQ.PRESETS[name] || RQ.PRESETS.balanced;
+    renderQualityName = preset.id;
+    const dpr = RQ.clampPixelRatio(window.devicePixelRatio || 1, preset.pixelRatioCap);
+    renderer.setPixelRatio(dpr);
+    const smType = RQ.shadowMapConstant(THREE, preset.shadowType);
+    if (smType != null) renderer.shadowMap.type = smType;
+    if (preset.shadows) {
+        toggleShadows(userShadowPref, true);
+        const tier = preset.shadowSize >= 2048 ? 'HIGH' : (preset.shadowSize >= 1024 ? 'MEDIUM' : 'LOW');
+        setShadowQuality(tier);
+        const sq = document.getElementById('shadow-quality-select');
+        if (sq) sq.value = tier;
+    } else {
+        toggleShadows(false, true);
+    }
+    if (preset.id === 'draft') {
+        toggleSSAO(false);
+        toggleBloom(false);
+        toggleHdriEnvironment(false);
+        const ssao = document.getElementById('ssao-toggle');
+        const bloom = document.getElementById('bloom-toggle');
+        const hdri = document.getElementById('hdri-toggle');
+        if (ssao) ssao.checked = false;
+        if (bloom) bloom.checked = false;
+        if (hdri) hdri.checked = false;
+    } else if (preset.id === 'present') {
+        toggleSSAO(true);
+        toggleHdriEnvironment(true);
+        const ssao = document.getElementById('ssao-toggle');
+        const hdri = document.getElementById('hdri-toggle');
+        if (ssao) ssao.checked = true;
+        if (hdri) hdri.checked = true;
+        setShadingMode('RAYTRACE');
+    } else {
+        toggleHdriEnvironment(true);
+        const hdri = document.getElementById('hdri-toggle');
+        if (hdri) hdri.checked = true;
+    }
+    const qSel = document.getElementById('quality-select');
+    if (qSel) qSel.value = preset.id;
+    markSceneDirty();
+    setVCB('Quality:', preset.id.charAt(0).toUpperCase() + preset.id.slice(1));
+}
+
+function withPresentationHelpersHidden(fn) {
+    const gridOn = groundGrid ? groundGrid.visible : true;
+    const axisPrev = axisHelpers.map(h => h.visible);
+    const tcOn = transformControls ? transformControls.visible : true;
+    if (groundGrid) groundGrid.visible = false;
+    axisHelpers.forEach(h => { h.visible = false; });
+    if (transformControls) transformControls.visible = false;
+    try { return fn(); }
+    finally {
+        if (groundGrid) groundGrid.visible = gridOn;
+        axisHelpers.forEach((h, i) => { h.visible = axisPrev[i]; });
+        if (transformControls) transformControls.visible = tcOn;
+        markSceneDirty();
+    }
+}
+
+function capturePresentSlide() {
+    return {
+        name: 'Slide ' + (presentSlides.length + 1),
+        position: camera.position.toArray(),
+        quaternion: camera.quaternion.toArray(),
+        target: orbitControls.target.toArray(),
+        fov: camera.fov,
+    };
+}
+
+function applyPresentSlide(slide, t) {
+    if (!slide) return;
+    const k = t == null ? 1 : t;
+    if (k >= 1) {
+        camera.position.fromArray(slide.position);
+        camera.quaternion.fromArray(slide.quaternion);
+        orbitControls.target.fromArray(slide.target);
+        camera.fov = slide.fov;
+        camera.updateProjectionMatrix();
+        orbitControls.update();
+        markSceneDirty();
+        return;
+    }
+}
+
+function refreshPresentSlideSelect() {
+    const sel = document.getElementById('present-slide-select');
+    const label = document.getElementById('present-slide-label');
+    if (sel) {
+        sel.innerHTML = '';
+        presentSlides.forEach((s, i) => {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = s.name || ('Slide ' + (i + 1));
+            if (i === presentIndex) opt.selected = true;
+            sel.appendChild(opt);
+        });
+        if (!presentSlides.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No slides — Add Slide';
+            sel.appendChild(opt);
+        }
+    }
+    if (label) {
+        label.textContent = presentSlides.length
+            ? ((presentIndex + 1) + ' / ' + presentSlides.length)
+            : 'No slides';
+    }
+}
+
+function addPresentSlide() {
+    presentSlides.push(capturePresentSlide());
+    presentIndex = presentSlides.length - 1;
+    refreshPresentSlideSelect();
+    scheduleAutosave();
+    setVCB('Present:', presentSlides[presentIndex].name + ' saved');
+}
+
+function deletePresentSlide() {
+    if (!presentSlides.length) return;
+    presentSlides.splice(presentIndex, 1);
+    presentIndex = Math.max(0, presentIndex - 1);
+    refreshPresentSlideSelect();
+    scheduleAutosave();
+    setVCB('Present:', 'Slide removed');
+}
+
+function gotoPresentSlide(i, animate) {
+    if (!presentSlides.length) { setVCB('Present:', 'Add a slide first'); return; }
+    const n = presentSlides.length;
+    presentIndex = ((i % n) + n) % n;
+    const slide = presentSlides[presentIndex];
+    if (animate) {
+        presentLerp = {
+            fromPos: camera.position.clone(),
+            fromQuat: camera.quaternion.clone(),
+            fromTarget: orbitControls.target.clone(),
+            fromFov: camera.fov,
+            to: slide,
+            t0: performance.now(),
+            dur: 900,
+        };
+    } else {
+        applyPresentSlide(slide, 1);
+    }
+    refreshPresentSlideSelect();
+    markSceneDirty();
+}
+
+function stepPresentLerp(now) {
+    if (!presentLerp) return;
+    const u = Math.min(1, (now - presentLerp.t0) / presentLerp.dur);
+    const s = u * u * (3 - 2 * u);
+    const to = presentLerp.to;
+    camera.position.lerpVectors(presentLerp.fromPos, new THREE.Vector3().fromArray(to.position), s);
+    const qTo = new THREE.Quaternion().fromArray(to.quaternion);
+    camera.quaternion.copy(presentLerp.fromQuat).slerp(qTo, s);
+    orbitControls.target.lerpVectors(presentLerp.fromTarget, new THREE.Vector3().fromArray(to.target), s);
+    camera.fov = presentLerp.fromFov + (to.fov - presentLerp.fromFov) * s;
+    camera.updateProjectionMatrix();
+    if (u >= 1) presentLerp = null;
+}
+
+function togglePresentPlayback() {
+    if (presentPlaying) {
+        presentPlaying = false;
+        if (presentPlayRaf) cancelAnimationFrame(presentPlayRaf);
+        presentPlayRaf = 0;
+        const btn = document.getElementById('present-play-btn');
+        if (btn) btn.textContent = 'Play';
+        setVCB('Present:', 'Paused');
+        return;
+    }
+    if (presentSlides.length < 2) { setVCB('Present:', 'Need 2+ slides to play'); return; }
+    presentPlaying = true;
+    const btn = document.getElementById('present-play-btn');
+    if (btn) btn.textContent = 'Pause';
+    const tick = () => {
+        if (!presentPlaying) return;
+        if (presentLerp) { presentPlayRaf = requestAnimationFrame(tick); return; }
+        gotoPresentSlide(presentIndex + 1, true);
+        presentPlayRaf = requestAnimationFrame(tick);
+    };
+    gotoPresentSlide(presentIndex, true);
+    presentPlayRaf = requestAnimationFrame(tick);
+}
+
+function setPresentChrome(on) {
+    document.body.classList.toggle('present-mode', on);
+    if (groundGrid) groundGrid.visible = !on;
+    axisHelpers.forEach(h => { h.visible = !on; });
+    if (transformControls) transformControls.visible = !on;
+    if (transformControls && on) transformControls.detach();
+    const bar = document.getElementById('present-bar');
+    if (bar) bar.style.display = on ? 'flex' : 'none';
+    markSceneDirty();
+}
+
+function enterPresentMode() {
+    if (presentMode) return;
+    presentMode = true;
+    presentSavedQuality = renderQualityName;
+    setPresentChrome(true);
+    applyRenderQuality('present');
+    if (!presentSlides.length) addPresentSlide();
+    else gotoPresentSlide(presentIndex, false);
+    setVCB('Present:', 'F5 / Esc to exit — arrows change slides');
+}
+
+function exitPresentMode() {
+    if (!presentMode) return;
+    presentMode = false;
+    presentPlaying = false;
+    presentLerp = null;
+    if (presentPlayRaf) cancelAnimationFrame(presentPlayRaf);
+    presentPlayRaf = 0;
+    setPresentChrome(false);
+    applyRenderQuality(presentSavedQuality || 'balanced');
+    if (selectedObject) transformControls.attach(selectedObject);
+    setVCB('Present:', 'Exited');
+}
+
+function togglePresentMode() {
+    if (presentMode) exitPresentMode();
+    else enterPresentMode();
+}
+
+async function exportPresentSlidePng() {
+    if (!presentSlides.length) addPresentSlide();
+    applyPresentSlide(presentSlides[presentIndex], 1);
+    const { w, h } = getRenderResolution();
+    const dataUrl = captureStillDataUrl(w, h);
+    triggerDownload(dataUrl, `3DCore_Slide_${presentIndex + 1}_${w}x${h}.png`);
+    setVCB('Present:', 'Slide PNG exported');
+}
+
+async function exportAllPresentSlides() {
+    if (!presentSlides.length) { setVCB('Present:', 'No slides'); return; }
+    const { w, h } = getRenderResolution();
+    for (let i = 0; i < presentSlides.length; i++) {
+        presentIndex = i;
+        applyPresentSlide(presentSlides[i], 1);
+        const dataUrl = captureStillDataUrl(w, h);
+        triggerDownload(dataUrl, `3DCore_Slide_${i + 1}_${w}x${h}.png`);
+        await new Promise(r => setTimeout(r, 250));
+    }
+    refreshPresentSlideSelect();
+    setVCB('Present:', presentSlides.length + ' slide PNG(s) exported');
+}
+
+async function exportPresentPathVideo() {
+    if (presentSlides.length < 2) { setVCB('Present:', 'Need 2+ slides for a path video'); return; }
+    if (typeof MediaRecorder === 'undefined') { setVCB('Present:', 'MediaRecorder not available'); return; }
+    const { w, h } = getRenderResolution();
+    const fps = 24;
+    const framesPerLeg = 24;
+    const prevPR = renderer.getPixelRatio();
+    const prevW = renderer.domElement.width, prevH = renderer.domElement.height;
+    const prevAspect = camera.aspect;
+    renderer.setPixelRatio(1);
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    const stream = renderer.domElement.captureStream(fps);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6 });
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    const stopped = new Promise(res => { rec.onstop = res; });
+    rec.start();
+    withPresentationHelpersHidden(() => {});
+    const gridOn = groundGrid ? groundGrid.visible : true;
+    if (groundGrid) groundGrid.visible = false;
+    axisHelpers.forEach(h => { h.visible = false; });
+    for (let s = 0; s < presentSlides.length - 1; s++) {
+        const a = presentSlides[s], b = presentSlides[s + 1];
+        for (let f = 0; f <= framesPerLeg; f++) {
+            const u = f / framesPerLeg;
+            const k = u * u * (3 - 2 * u);
+            camera.position.lerpVectors(new THREE.Vector3().fromArray(a.position), new THREE.Vector3().fromArray(b.position), k);
+            const qa = new THREE.Quaternion().fromArray(a.quaternion);
+            const qb = new THREE.Quaternion().fromArray(b.quaternion);
+            camera.quaternion.copy(qa).slerp(qb, k);
+            orbitControls.target.lerpVectors(new THREE.Vector3().fromArray(a.target), new THREE.Vector3().fromArray(b.target), k);
+            camera.fov = a.fov + (b.fov - a.fov) * k;
+            camera.updateProjectionMatrix();
+            renderer.render(scene, camera);
+            await new Promise(r => setTimeout(r, 1000 / fps));
+        }
+    }
+    rec.stop();
+    await stopped;
+    if (groundGrid) groundGrid.visible = gridOn;
+    axisHelpers.forEach(h => { h.visible = !presentMode; });
+    renderer.setPixelRatio(prevPR);
+    renderer.setSize(prevW, prevH, false);
+    camera.aspect = prevAspect;
+    camera.updateProjectionMatrix();
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    triggerDownload(url, `3DCore_Present_${w}x${h}.webm`);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    markSceneDirty();
+    setVCB('Present:', 'Path video exported');
+}
+
 
 window.onload = initApp;

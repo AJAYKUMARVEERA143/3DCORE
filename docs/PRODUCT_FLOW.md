@@ -221,4 +221,4 @@ Each wave ships a **file or a mode** the user can click. No wave is “research 
 
 World-class lightweight ante: **install ledhu, button nijam, output file open avuthundi.** Fake path tracer / 128 GPU / DWG magic **vaddu**.
 
-Implementation next: Wave **P2 Present mode** after the render-quality ladder (`docs/RENDER_XR_PLAN.md` Wave A).
+Implementation status (2026-08-23): Wave **P1 quality ladder** + **P2 Present mode** + **P3 2×/4× stills and slide-path WebM** ship in the browser client (`web/js/render_adapter.js`, Present workspace / F5). VR/AR and extra CAD formats remain later waves.

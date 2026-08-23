@@ -11,6 +11,7 @@ No build step. No `npm install`. No native app to install — open a browser tab
 - **Real sculpting** — all 16 Blender-style brushes (Draw, Clay, Grab, Snake Hook, Smooth, Flatten, Mask, Draw Face Sets, and more), each a genuinely distinct algorithm.
 - **Materials** — a 96-material PBR library across 12 categories, real per-face application (paint one surface without recoloring the whole object), animated preview thumbnails, drag-and-drop.
 - **Lighting & rendering** — Point/Spot/Directional/Area lights, a Day/Night sun system, shadow quality tiers, SSAO, Bloom, procedural HDRI environment lighting.
+- **Present mode** — F5 / Present tab: hide modeling chrome, camera slides, 2×/4× PNG stills, slide-path WebM. Draft / Balanced / Present quality ladder cuts GPU load while you model.
 - **Real-time LAN P2P render pool** — distribute a render job across multiple machines on the same network over genuine WebRTC data channels.
 - **AI Assistant** — natural-language modeling commands that call real tool functions (via a user-supplied Anthropic or OpenAI API key).
 - **Document persistence** — Quick Save/Load (IndexedDB), Save/Open Project (`.3dcore.json`), GLB import/export, full undo/redo.
@@ -47,7 +48,9 @@ scripts/        Launch scripts (run.sh / run.ps1)
 
 ## Documentation
 
-`docs/ROADMAP.md` is the authoritative, continuously updated record of this project: what's built, what's still open, and — for every fix along the way — the real bug, its root cause, and how it was verified. Start there for anything beyond a quick overview.
+- **How the product is supposed to work** (Present, images/video/VR/AR, import/export): `docs/PRODUCT_FLOW.md`
+- Running log of what is built and what is still open: `docs/ROADMAP.md`
+- Render quality + VR/AR build plan: `docs/RENDER_XR_PLAN.md`
 
 ## Design philosophy
 

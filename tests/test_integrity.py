@@ -84,6 +84,9 @@ class StubApiTests(unittest.TestCase):
             html = resp.read().decode("utf-8", errors="replace")
         self.assertIn("3D Core Studio", html)
         self.assertNotIn("Cycles Path Tracer", html)
+        self.assertIn("js/render_adapter.js", html)
+        self.assertIn('id="quality-select"', html)
+        self.assertIn('id="present-bar"', html)
 
 
 class HtmlJsContractTests(unittest.TestCase):
@@ -95,6 +98,45 @@ class HtmlJsContractTests(unittest.TestCase):
         js_ids = set(re.findall(r"getElementById\(['\"]([^'\"]+)['\"]\)", js))
         missing = sorted(js_ids - html_ids)
         self.assertEqual(missing, [])
+
+
+class RenderQualityTests(unittest.TestCase):
+    def test_adapter_math_via_node(self):
+        import subprocess
+        script = r"""
+const RQ = require('./web/js/render_adapter.js');
+if (RQ.clampPixelRatio(2, 1) !== 1) process.exit(2);
+if (RQ.clampPixelRatio(2, 1.5) !== 1.5) process.exit(3);
+if (RQ.PRESETS.draft.shadows !== false) process.exit(4);
+if (RQ.PRESETS.present.shadowSize !== 2048) process.exit(5);
+const sz = RQ.downsampleSize(1920, 1080, 2, 8192);
+if (sz.renderW !== 3840 || sz.outW !== 1920) process.exit(6);
+const skip = RQ.shouldRenderFrame({ documentHidden: true, dirty: true, nowMs: 100, lastDrawMs: 0, fpsCap: 60 });
+if (skip !== false) process.exit(7);
+const draw = RQ.shouldRenderFrame({ documentHidden: false, dirty: true, nowMs: 100, lastDrawMs: 0, fpsCap: 30 });
+if (draw !== true) process.exit(8);
+const idle = RQ.shouldRenderFrame({ documentHidden: false, dirty: false, cameraMoved: false, nowMs: 100, lastDrawMs: 0, fpsCap: 60 });
+if (idle !== false) process.exit(9);
+console.log('ok');
+"""
+        proc = subprocess.run(
+            ["node", "-e", script],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ok", proc.stdout)
+
+    def test_present_hooks_in_app(self):
+        js = (ROOT / "web" / "js" / "app.js").read_text()
+        self.assertIn("function applyRenderQuality", js)
+        self.assertIn("function enterPresentMode", js)
+        self.assertIn("function captureStillDataUrl", js)
+        html = (ROOT / "web" / "index.html").read_text()
+        self.assertIn("Present", html)
+        self.assertIn("render-supersample", html)
 
 
 if __name__ == "__main__":

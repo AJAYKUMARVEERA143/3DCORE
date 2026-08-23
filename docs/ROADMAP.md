@@ -4,7 +4,7 @@
 
 **Bug audit + fixes (2026-08-23):** see `docs/BUG_AUDIT.md` (grid snap, multi-select, New Scene light leak, 501 stub APIs, honest render labels).
 
-**Lightweight render + VR/AR plan (2026-08-23):** see `docs/RENDER_XR_PLAN.md` (quality ladder to cut GPU cost, WebXR VR walkthrough, ARCore + iOS Quick Look — no second native engine).
+**Lightweight render + VR/AR plan (2026-08-23):** see `docs/RENDER_XR_PLAN.md`. Quality ladder + Present mode now ship in the client; WebXR VR/AR is still the later wave.
 
 **End-to-end product flow (2026-08-23):** see `docs/PRODUCT_FLOW.md` — one project → Present mode → realistic stills/video/VR/AR + honest import/export.
 

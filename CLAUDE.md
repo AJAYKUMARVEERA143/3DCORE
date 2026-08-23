@@ -35,7 +35,9 @@ ROADMAP also refers to Playwright scripts that are not in this tree.
 
 | Path | What |
 | --- | --- |
-| `web/js/app.js` | All application logic (scene, tools, CSG, sculpt, persist, AI client, P2P) |
+| `web/js/app.js` | All application logic (scene, tools, CSG, sculpt, persist, AI client, P2P, Present mode) |
+| `web/js/render_adapter.js` | Quality ladder (Draft / Balanced / Present) + still supersample math |
+| `web/index.html` | UI shell |
 | `web/index.html` | UI shell |
 | `web/css/style.css` | Styles |
 | `server.py` | HTTP + WebSocket signaling |

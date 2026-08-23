@@ -43,6 +43,8 @@
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="triggerImportGLB()">Import GLB… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportGLB()">Export GLB <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-sep"></div>
+        <div class="top-menu-dropdown-item" onclick="togglePresentMode()">Present Mode <span class="kbd">F5</span></div>
       </div>
     </div>
     <div class="top-menu-item" id="menu-edit" onclick="toggleTopMenu(event,'menu-edit')">Edit
@@ -82,6 +84,7 @@
       <div class="ws-tab-chip" onclick="switchWS(this,'anim')">Animation</div>
       <div class="ws-tab-chip" onclick="switchWS(this,'shade')">Shading (PBR)</div>
       <div class="ws-tab-chip" onclick="switchWS(this,'render')">Rendered View</div>
+      <div class="ws-tab-chip" onclick="switchWS(this,'present')">Present</div>
       <div class="ws-tab-chip" onclick="switchWS(this,'bim')">BIM Architecture</div>
       <div class="ws-tab-chip" onclick="openAssetLibrary()">Asset Library</div>
     </div>
@@ -735,6 +738,15 @@
                 <option value="SOLID">Solid</option>
                 <option value="WIREFRAME">Wireframe</option>
               </select>
+              <div class="prop-numeric-row" style="margin-top:8px;">
+                <span class="prop-label">Quality</span>
+                <select id="quality-select" style="flex:1; font-size:10px;" onchange="applyRenderQuality(this.value)" title="Draft saves GPU while you model. Present spends GPU for the client view. Not a path tracer.">
+                  <option value="draft">Draft (low GPU)</option>
+                  <option value="balanced" selected>Balanced</option>
+                  <option value="present">Present</option>
+                </select>
+              </div>
+              <div style="font-size:9.5px; color:var(--b-text-muted); margin-top:4px;">WebGL PBR. Draft caps pixel ratio and turns shadows off. Present raises shadow maps and optional SSAO.</div>
               <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:#ccc; cursor:pointer;">
                 <input type="checkbox" id="shadow-toggle-checkbox" checked onchange="toggleShadows(this.checked)">
                 Shadows
@@ -837,6 +849,14 @@
                 <input type="number" id="render-fps" value="24" min="1" max="60" style="width:45px; background:#141414; border:1px solid #333; color:#fff; padding:2px;">
               </div>
 
+              <div class="prop-numeric-row" style="margin-bottom:8px;">
+                <span class="prop-label">Supersample</span>
+                <select id="render-supersample" style="flex:1; font-size:10px;">
+                  <option value="1" selected>1× (fast)</option>
+                  <option value="2">2× (sharper)</option>
+                  <option value="4">4× (best still)</option>
+                </select>
+              </div>
               <button onclick="renderStillImage()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Render Image</button>
               <button onclick="renderAnimationVideo()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Animation (Video)</button>
               <div id="render-progress" style="font-size:10px; color:var(--b-text-sub); margin-top:6px;"></div>
@@ -971,6 +991,20 @@
   </div>
 </div>
 
+<div id="present-bar">
+  <span id="present-slide-label">No slides</span>
+  <select id="present-slide-select" onchange="gotoPresentSlide(parseInt(this.value,10), true)"></select>
+  <button type="button" onclick="addPresentSlide()">Add Slide</button>
+  <button type="button" onclick="deletePresentSlide()">Delete</button>
+  <button type="button" onclick="gotoPresentSlide(presentIndex-1, true)">Prev</button>
+  <button type="button" id="present-play-btn" onclick="togglePresentPlayback()">Play</button>
+  <button type="button" onclick="gotoPresentSlide(presentIndex+1, true)">Next</button>
+  <button type="button" onclick="exportPresentSlidePng()">PNG</button>
+  <button type="button" onclick="exportAllPresentSlides()">All PNG</button>
+  <button type="button" onclick="exportPresentPathVideo()">Path Video</button>
+  <button type="button" onclick="exitPresentMode()">Exit (Esc)</button>
+</div>
+<script src="js/render_adapter.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
