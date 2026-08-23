@@ -45,6 +45,7 @@
         <div class="top-menu-dropdown-item" onclick="exportGLB()">Export GLB <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="togglePresentMode()">Present Mode <span class="kbd">F5</span></div>
+        <div class="top-menu-dropdown-item" onclick="takeViewportScreenshot()">Screenshot <span class="kbd">F10</span></div>
       </div>
     </div>
     <div class="top-menu-item" id="menu-edit" onclick="toggleTopMenu(event,'menu-edit')">Edit
@@ -349,6 +350,9 @@
       </button>
       <button class="nav-gizmo-mini-btn" onclick="setViewAngle('bottom')" title="Bottom View (Ctrl+Num7)">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="18"/><polyline points="6,12 12,18 18,12"/></svg>
+      </button>
+      <button class="nav-gizmo-mini-btn" onclick="takeViewportScreenshot()" title="Screenshot current view (F10)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg>
       </button>
     </div>
 
@@ -857,6 +861,7 @@
                   <option value="4">4× (best still)</option>
                 </select>
               </div>
+              <button onclick="takeViewportScreenshot()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Screenshot View (F10)</button>
               <button onclick="renderStillImage()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Render Image</button>
               <button onclick="renderAnimationVideo()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Animation (Video)</button>
               <div id="render-progress" style="font-size:10px; color:var(--b-text-sub); margin-top:6px;"></div>
@@ -991,6 +996,7 @@
   </div>
 </div>
 
+<div id="screenshot-flash"></div>
 <div id="present-bar">
   <span id="present-slide-label">No slides</span>
   <select id="present-slide-select" onchange="gotoPresentSlide(parseInt(this.value,10), true)"></select>
@@ -999,6 +1005,7 @@
   <button type="button" onclick="gotoPresentSlide(presentIndex-1, true)">Prev</button>
   <button type="button" id="present-play-btn" onclick="togglePresentPlayback()">Play</button>
   <button type="button" onclick="gotoPresentSlide(presentIndex+1, true)">Next</button>
+  <button type="button" onclick="takeViewportScreenshot()">Shot</button>
   <button type="button" onclick="exportPresentSlidePng()">PNG</button>
   <button type="button" onclick="exportAllPresentSlides()">All PNG</button>
   <button type="button" onclick="exportPresentPathVideo()">Path Video</button>

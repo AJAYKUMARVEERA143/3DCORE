@@ -138,6 +138,14 @@ console.log('ok');
         self.assertIn("Present", html)
         self.assertIn("render-supersample", html)
 
+    def test_screenshot_hooks(self):
+        js = (ROOT / "web" / "js" / "app.js").read_text()
+        html = (ROOT / "web" / "index.html").read_text()
+        self.assertIn("function takeViewportScreenshot", js)
+        self.assertIn("case 'F10'", js)
+        self.assertIn('id="screenshot-flash"', html)
+        self.assertIn("takeViewportScreenshot()", html)
+
 
 if __name__ == "__main__":
     unittest.main()

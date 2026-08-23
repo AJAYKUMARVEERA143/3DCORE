@@ -3063,6 +3063,11 @@ function setupKeyboard() {
         // focus was still sitting in some other field, leaving a Line/
         // Wall/Poly Build path stuck mid-draw with no way to cancel it
         // from the keyboard.
+        if (e.key === 'F10') {
+            e.preventDefault();
+            takeViewportScreenshot();
+            return;
+        }
         if (e.key === 'Escape' && presentMode && !sketchState) {
             exitPresentMode();
             return;
@@ -3104,6 +3109,7 @@ function setupKeyboard() {
                 return;
             }
             if (k === 'y') { e.preventDefault(); redo(); return; }
+            if (k === 's' && e.shiftKey) { e.preventDefault(); takeViewportScreenshot(); return; }
             if (k === 's') { e.preventDefault(); saveProjectFile(); return; }
             if (k === 'o') { e.preventDefault(); triggerOpenProjectFile(); return; }
             // Ctrl+Numpad — opposite-axis views (Blender convention)
@@ -3229,6 +3235,10 @@ function setupKeyboard() {
             case 'F5':
                 e.preventDefault();
                 togglePresentMode();
+                break;
+            case 'F10':
+                e.preventDefault();
+                takeViewportScreenshot();
                 break;
             case 'i': case 'I': insertKeyframe(); break;
 
@@ -3795,6 +3805,46 @@ function renderStillImage() {
     const dataUrl = captureStillDataUrl(w, h);
     triggerDownload(dataUrl, `3DCore_Render_${w}x${h}.png`);
     setVCB('Render:', `Image ${w}×${h} rendered`);
+}
+
+// Viewport screenshot — what is on screen now (current camera, quality, canvas
+// size). Distinct from Render Image, which resizes to the Output panel
+// resolution and optional 2×/4× supersample.
+function takeViewportScreenshot() {
+    if (!renderer || !scene || !camera) {
+        setVCB('Screenshot:', 'Viewport is not ready');
+        return;
+    }
+    const canvas = renderer.domElement;
+    let dataUrl = '';
+    withPresentationHelpersHidden(() => {
+        renderer.render(scene, camera);
+        dataUrl = canvas.toDataURL('image/png');
+    });
+    const w = canvas.width;
+    const h = canvas.height;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    triggerDownload(dataUrl, `3DCore_Screenshot_${w}x${h}_${stamp}.png`);
+    copyPngDataUrlToClipboard(dataUrl);
+    flashScreenshot();
+    setVCB('Screenshot:', `${w}×${h} PNG`);
+}
+
+function copyPngDataUrlToClipboard(dataUrl) {
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') return;
+    fetch(dataUrl)
+        .then(r => r.blob())
+        .then(blob => navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]))
+        .catch(() => {});
+}
+
+function flashScreenshot() {
+    const el = document.getElementById('screenshot-flash');
+    if (!el) return;
+    el.classList.remove('is-on');
+    void el.offsetWidth;
+    el.classList.add('is-on');
+    setTimeout(() => el.classList.remove('is-on'), 200);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -4676,6 +4726,7 @@ const CAD_COMMANDS = {
     PRESENT: () => enterPresentMode(), PRES: () => enterPresentMode(),
     QUALITY: (arg) => applyRenderQuality((arg || 'balanced').toLowerCase()),
     SLIDE: () => addPresentSlide(),
+    SCREENSHOT: () => takeViewportScreenshot(), SHOT: () => takeViewportScreenshot(), SS: () => takeViewportScreenshot(),
 
     HELP: () => openHelpDesk(), H: () => openHelpDesk(), '?': () => openHelpDesk(),
 };
@@ -9688,6 +9739,7 @@ function showKeyboardShortcuts() {
             <b>Numpad 1 / 3 / 7 / 5</b><span>Front / Right / Top / toggle Ortho</span>
             <b>Shift+D</b><span>Duplicate</span>
             <b>F5</b><span>Present mode (fullscreen client view)</span>
+            <b>F10 / Ctrl+Shift+S</b><span>Screenshot current view (PNG)</span>
             <b>F12</b><span>Render (Rendered shading)</span>
             <b>Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y</b><span>Undo / Redo</span>
             <b>Ctrl+S / Ctrl+O</b><span>Save / Open Project</span>
