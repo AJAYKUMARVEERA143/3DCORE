@@ -12,6 +12,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/STLExporter.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/lights/RectAreaLightUniformsLib.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/SimplexNoise.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
@@ -35,6 +36,7 @@
     <div class="top-menu-item" id="menu-file" onclick="toggleTopMenu(event,'menu-file')">File
       <div class="top-menu-dropdown">
         <div class="top-menu-dropdown-item" onclick="newScene()">New Scene <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="showWelcomeScreen()">Recent Projects… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="saveProjectFile()">Save Project <span class="kbd">Ctrl+S</span></div>
         <div class="top-menu-dropdown-item" onclick="triggerOpenProjectFile()">Open Project… <span class="kbd">Ctrl+O</span></div>
@@ -43,6 +45,10 @@
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="triggerImportGLB()">Import GLB… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportGLB()">Export GLB <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="triggerImportImage()">Import Image (Floorplan)… <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exportSTL()">Export STL <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-sep"></div>
+        <div class="top-menu-dropdown-item" onclick="deleteAllGuides()">Delete All Guides <span class="kbd"></span></div>
       </div>
     </div>
     <div class="top-menu-item" id="menu-edit" onclick="toggleTopMenu(event,'menu-edit')">Edit
@@ -72,6 +78,7 @@
     </div>
     <input type="file" id="file-open-project" accept=".json,.3dcore.json" style="display:none" onchange="handleOpenProjectFile(event)">
     <input type="file" id="file-import-glb" accept=".glb,.gltf" style="display:none" onchange="handleImportGLBFile(event)">
+    <input type="file" id="file-import-image" accept="image/*" style="display:none" onchange="handleImportImageFile(event)">
 
     <!-- Workspace Tabs Strip -->
     <div class="workspace-tabs-strip">
@@ -250,6 +257,9 @@
     </button>
     <button class="su-palette-btn" id="tb-lookaround" onclick="setActiveTool('lookaround')" title="Look Around — drag to pivot from a fixed standing point, Esc to exit">
       <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-position_camera" onclick="setActiveTool('position_camera')" title="Position Camera — click a point to stand there at eye height (5'6&quot;)">
+      <svg viewBox="0 0 20 20"><circle cx="10" cy="4" r="2" fill="currentColor"/><line x1="10" y1="7" x2="10" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="8.5" x2="6" y2="7.5" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="8.5" x2="14" y2="7.5" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="12" x2="7" y2="16" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="12" x2="13" y2="16" stroke="currentColor" stroke-width="1.5"/><circle cx="6" cy="17.5" r="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
     </button>
 
     <div class="su-tool-sep"></div>
@@ -908,8 +918,11 @@
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); ungroupSelected();">Ungroup <span class="kbd"></span></div>
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); makeComponentFromSelection();">Make Component</div>
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); insertComponentInstance();">Insert Component Instance</div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); makeUniqueComponent();" title="Select a Component instance first">Make Unique</div>
   <div class="top-menu-dropdown-sep"></div>
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); convertToGuide();" title="Select a drawn Line first">Make Guide (dashed)</div>
+  <div class="top-menu-dropdown-sep"></div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); toggleLockSelected();" title="Prevents Move/Rotate/Scale until unlocked">Lock / Unlock</div>
 </div>
 
 <!-- ═══════════════════════════ INFO MODAL — Help ▸ Keyboard Shortcuts / About ═══════════════════════════ -->
@@ -937,6 +950,31 @@
       <button onclick="document.getElementById('info-modal').style.display='none'" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:13px;">✕</button>
     </div>
     <div id="info-modal-body" style="font-size:10.5px; color:#ddd; line-height:1.7;"></div>
+  </div>
+</div>
+
+<div id="welcome-screen" style="display:none; position:fixed; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:900; align-items:center; justify-content:center;">
+  <div style="background:var(--b-bg-panel); border:1px solid var(--b-border-light); border-radius:8px; width:760px; max-height:82vh; display:flex; flex-direction:column; padding:20px; box-shadow:0 12px 40px rgba(0,0,0,0.6);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <strong style="font-size:16px;">3D Core Studio</strong>
+      <button onclick="closeWelcomeScreen()" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:15px;">✕</button>
+    </div>
+
+    <div style="font-size:10px; color:var(--b-text-sub); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Create New</div>
+    <div style="display:flex; gap:10px; margin-bottom:20px;">
+      <div onclick="startNewProjectFromWelcome()" style="cursor:pointer; width:140px; text-align:center;">
+        <div style="width:140px; height:88px; border:1px solid var(--b-border-light); border-radius:4px; background:var(--b-bg-input); display:flex; align-items:center; justify-content:center; font-size:26px; color:#7ee8fa;">+</div>
+        <div style="font-size:10.5px; margin-top:6px;">Blank Scene</div>
+      </div>
+    </div>
+
+    <div style="font-size:10px; color:var(--b-text-sub); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Recent Projects</div>
+    <div id="welcome-recent-grid" style="overflow-y:auto; display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; padding-right:4px; flex:1;"></div>
+    <div id="welcome-recent-empty" style="display:none; font-size:10.5px; color:var(--b-text-sub); padding:24px 0; text-align:center;">No recent projects yet — Save Project, Quick Save, or Open Project to see them here.</div>
+
+    <label style="display:flex; align-items:center; gap:6px; margin-top:16px; padding-top:12px; border-top:1px solid var(--b-border-light); font-size:10px; color:var(--b-text-sub); cursor:pointer;">
+      <input type="checkbox" id="welcome-startup-checkbox" checked onchange="toggleShowWelcomeOnStartup(this.checked)"> Always show this at startup
+    </label>
   </div>
 </div>
 

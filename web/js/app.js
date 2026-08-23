@@ -206,6 +206,9 @@ function initApp() {
     initViewCube();
     document.querySelectorAll('.units-quick-select').forEach(el => { el.value = appUnits; });
     tryAutoRestoreSession();
+    let showOnStartup = true;
+    try { showOnStartup = localStorage.getItem(WELCOME_PREF_KEY) !== '0'; } catch (err) { /* private-mode storage denial — default stays true */ }
+    if (showOnStartup) showWelcomeScreen();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -324,6 +327,7 @@ function renderOutliner() {
         row.innerHTML = `
             <div class="tree-row-left" style="${hidden ? 'opacity:0.4;' : ''}">${icon} <span>${item.name}</span></div>
             <div class="tree-row-right" style="font-size:10px; color:#666;">
+                <span class="outliner-lock-toggle" title="${item.locked ? 'Locked — click to unlock' : 'Unlocked — click to lock'}" style="cursor:pointer;">${item.locked ? '🔒' : '🔓'}</span>
                 <span class="outliner-vis-toggle" title="${hidden ? 'Hidden — click to show' : 'Visible — click to hide'}" style="cursor:pointer;">${hidden ? '🚫' : '👁'}</span>
             </div>
         `;
@@ -335,6 +339,7 @@ function renderOutliner() {
             else { outlinerMultiSelect.clear(); selectObject(item.mesh); }
         };
         row.querySelector('.outliner-vis-toggle').onclick = e => { e.stopPropagation(); toggleObjectVisibility(item.mesh); };
+        row.querySelector('.outliner-lock-toggle').onclick = e => { e.stopPropagation(); outlinerMultiSelect.clear(); selectObject(item.mesh); toggleLockSelected(); };
         list.appendChild(row);
     });
 }
@@ -1330,6 +1335,43 @@ function finishTape() {
     commitNewObject(line, 'guide');
     setVCB('Measurements:', formatLength(dist, 3));
     sketchState = null;
+    offerTapeMeasureRescale(dist);
+}
+
+// Real SketchUp behavior: after measuring a distance (typically along an
+// imported floorplan image's known real-world dimension), entering the
+// ACTUAL length rescales the whole model uniformly so that measurement
+// becomes correct — this is how a raster floorplan underlay gets
+// calibrated to real-world units.
+function offerTapeMeasureRescale(measuredMeters) {
+    if (measuredMeters < 1e-6) return;
+    const input = prompt(`Measured: ${formatLength(measuredMeters, 3)}.\n\nTo resize the whole model so this measurement matches a known real-world length, type it now (e.g. "12 ft" or "3.5 m"). Leave blank to just keep this as a guide.`, '');
+    if (!input) return;
+    const targetMeters = parseTypedLength(input.trim());
+    if (targetMeters == null || targetMeters < 1e-6) { alert('Could not understand that length.'); return; }
+    const ratio = targetMeters / measuredMeters;
+    if (Math.abs(ratio - 1) < 1e-4) return;
+    if (!confirm(`Resize the entire model ${ratio.toFixed(3)}x so this measurement becomes ${formatLength(targetMeters, 3)}?`)) return;
+    rescaleEntireModel(ratio);
+    setVCB('Resized Model:', `${ratio.toFixed(3)}x -- measurement now ${formatLength(targetMeters, 3)}`);
+}
+
+// Uniformly rescales every top-level object around the world origin —
+// repositioning AND resizing geometry-bearing objects (mesh/group/
+// component/guide), but only repositioning (not resizing) cameras/lights,
+// which have no meaningful "size" of their own.
+function rescaleEntireModel(ratio) {
+    const before = sceneObjects.map(o => ({ entry: o, pos: o.mesh.position.clone(), scale: o.mesh.scale.clone() }));
+    const apply = () => before.forEach(({ entry }) => {
+        entry.mesh.position.multiplyScalar(ratio);
+        if (entry.type !== 'camera' && entry.type !== 'light') entry.mesh.scale.multiplyScalar(ratio);
+    });
+    apply();
+    scheduleAutosave();
+    pushUndo({
+        undo() { before.forEach(({ entry, pos, scale }) => { entry.mesh.position.copy(pos); entry.mesh.scale.copy(scale); }); },
+        redo() { apply(); },
+    });
 }
 
 // --- Poly Build: click points to build a new fan-triangulated face (min 3), double-click/Enter to finish ---
@@ -1646,7 +1688,7 @@ function eraseAtEvent(pt, hitObject) {
 function setupSketchTools(canvas) {
     let pDown = { x: 0, y: 0 };
     const DRAG_TOOLS = ['rect', 'circle', 'polygon', 'pie'];
-    const CLICK_TOOLS = ['line', 'arc', 'tape', 'poly_build', 'wall', 'slab', 'rotrect'];
+    const CLICK_TOOLS = ['line', 'arc', 'tape', 'poly_build', 'wall', 'slab', 'rotrect', 'position_camera'];
 
     canvas.addEventListener('pointerdown', e => {
         pDown = { x: e.clientX, y: e.clientY };
@@ -1722,6 +1764,7 @@ function setupSketchTools(canvas) {
         else if (activeTool === 'poly_build') handlePolyBuildClick(pt);
         else if (activeTool === 'wall') handleWallClick(pt);
         else if (activeTool === 'slab') handleSlabClick(pt);
+        else if (activeTool === 'position_camera') positionCameraAt(pt);
     });
 
     canvas.addEventListener('dblclick', () => {
@@ -2186,7 +2229,9 @@ function selectObject(mesh) {
     if (mesh !== selectedObject) { clearFaceSelection(); clearVertexSelection(); clearEdgeSelection(); }
     selectedObject = mesh;
 
-    if (mesh && (currentInteractionMode === 'object' || currentInteractionMode === 'sketchup')) {
+    const entry = mesh && sceneObjects.find(o => o.mesh === mesh);
+    const locked = !!(entry && entry.locked);
+    if (mesh && !locked && (currentInteractionMode === 'object' || currentInteractionMode === 'sketchup')) {
         transformControls.attach(mesh);
     } else {
         transformControls.detach();
@@ -2736,6 +2781,24 @@ function toggleWalkMode(enabled, lookAroundOnly) {
     }
 }
 
+// POSITION CAMERA — a discrete one-shot teleport (distinct from continuous
+// Walk/Look Around above): click any point, line, or surface and the
+// camera jumps to stand there at a real eye height (5'6" / 1.68m above the
+// clicked point), keeping its current facing direction but leveling out
+// any pitch — matching real SketchUp's Position Camera Tool. Orbit
+// controls stay in charge afterward (this tool doesn't hand off into Walk
+// mode); the tool itself stays active so repeated clicks keep repositioning.
+const EYE_HEIGHT_METERS = 1.68; // 5'6"
+function positionCameraAt(pt) {
+    camera.position.set(pt.x, pt.y, pt.z + EYE_HEIGHT_METERS);
+    initWalkYawPitchFromCamera();
+    _walkPitch = 0; // level standing eye view, not pointed at the clicked surface
+    applyWalkLook();
+    orbitControls.target.copy(camera.position.clone().addScaledVector(new THREE.Vector3(Math.sin(_walkYaw), Math.cos(_walkYaw), 0), 3));
+    orbitControls.update();
+    setVCB('Position Camera:', `Eye height ${formatLength(EYE_HEIGHT_METERS, 2)} above clicked point`);
+}
+
 // Statistics overlay (Blender: Viewport Overlays > Statistics) — total
 // triangle/vertex count across the scene's real meshes.
 function sceneStats() {
@@ -2793,7 +2856,7 @@ const TOOL_CURSORS = {
     eraser: 'not-allowed', select_box: 'crosshair', select_circle: 'crosshair',
     line: 'crosshair', rect: 'crosshair', circle: 'crosshair', arc: 'crosshair',
     polygon: 'crosshair', pie: 'crosshair', rotrect: 'crosshair',
-    walk: 'move', lookaround: 'grab',
+    walk: 'move', lookaround: 'grab', position_camera: 'crosshair',
     poly_build: 'crosshair',
     pushpull: svgCursor(PUSHPULL_CURSOR_GLYPH, 12, 'ns-resize'),
     offset: svgCursor(OFFSET_CURSOR_GLYPH, 12, 'ns-resize'),
@@ -2823,6 +2886,22 @@ function updateToolSettingsPanel(tool) {
         const titleEl = document.getElementById('tool-settings-title');
         if (titleEl) titleEl.innerText = titles[tool];
         if (tool === 'opening') refreshOpeningPresetDropdown();
+        // Anchored to the ACTUAL current rects of the Tools palette and
+        // the viewport HUD text (not a hardcoded pixel offset) — the Tools
+        // palette floats on top of the canvas (the canvas is full-bleed
+        // underneath it, so its own rect gives no clearance info) and is
+        // itself dockable/floatable, so a fixed left:56px only ever
+        // happened to clear it in one specific layout. Measuring both
+        // real rects and placing this panel clear of whichever extends
+        // further keeps it out of the way regardless of current layout.
+        const toolsPalette = document.getElementById('su-toolbar');
+        const hud = document.querySelector('.viewport-hud-text');
+        const toolsRect = toolsPalette ? toolsPalette.getBoundingClientRect() : null;
+        const hudRect = hud ? hud.getBoundingClientRect() : null;
+        const left = toolsRect ? Math.max(toolsRect.right + 8, 56) : 56;
+        const top = hudRect ? Math.max(hudRect.bottom + 8, 12) : 12;
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
         panel.style.display = 'block';
     } else {
         panel.style.display = 'none';
@@ -5085,6 +5164,20 @@ function convertToGuide() {
     pushUndo({
         undo() { obj.material.dispose(); obj.material = beforeMat; entry.type = beforeType; renderOutliner(); },
         redo() { obj.material.dispose(); obj.material = new THREE.LineDashedMaterial({ color: 0x2fa5ff, dashSize: 0.15, gapSize: 0.1 }); obj.computeLineDistances(); entry.type = 'guide'; renderOutliner(); },
+    });
+}
+
+// Edit > Delete All Guides — bulk-clears every construction guide (Tape
+// Measure measurements + anything converted via Make Guide) in one action,
+// matching real SketchUp's Edit > Delete Guides.
+function deleteAllGuides() {
+    const guides = sceneObjects.filter(o => o.type === 'guide').map(o => o.mesh);
+    if (guides.length === 0) { setVCB('Delete Guides:', 'No guides in the model'); return; }
+    guides.forEach(m => removeSceneObject(m));
+    setVCB('Delete Guides:', `${guides.length} guide(s) removed`);
+    pushUndo({
+        undo() { guides.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'guide', mesh: m }); }); renderOutliner(); },
+        redo() { guides.forEach(m => removeSceneObject(m)); },
     });
 }
 
@@ -7694,6 +7787,28 @@ function propagateComponentEdit(mesh) {
     });
 }
 
+// Make Unique — detaches one component instance from its shared definition
+// so future edits to it (or to its former siblings) no longer propagate
+// either way, matching real SketchUp's "Make Unique" on a component copy.
+function makeUniqueComponent() {
+    const obj = selectedObject;
+    const defId = obj && obj.userData && obj.userData.componentDefId;
+    if (!defId) { setVCB('Make Unique:', 'Select a Component instance first'); return; }
+    const siblings = componentInstancesByDef.get(defId);
+    const entry = sceneObjects.find(o => o.mesh === obj);
+
+    delete obj.userData.componentDefId;
+    if (siblings) siblings.delete(obj);
+    if (entry) entry.type = 'mesh';
+    renderOutliner();
+    setVCB('Make Unique:', `${obj.name} no longer shares edits with other instances`);
+
+    pushUndo({
+        undo() { obj.userData.componentDefId = defId; if (siblings) siblings.add(obj); if (entry) entry.type = 'component'; renderOutliner(); },
+        redo() { delete obj.userData.componentDefId; if (siblings) siblings.delete(obj); if (entry) entry.type = 'mesh'; renderOutliner(); },
+    });
+}
+
 // ─────────────────────────────────────────────────────────────
 // DELETE/DISSOLVE (X) for a sub-element selection — removes just the
 // selected face(s), or every triangle touching the selected vertex/edge,
@@ -7967,6 +8082,7 @@ function deleteSelected() {
     const mesh = selectedObject;
     const entry = sceneObjects.find(o => o.mesh === mesh);
     if (!entry) return;
+    if (entry.locked) { setVCB('Delete:', `${entry.name} is locked — unlock it first`); return; }
     const type = entry.type;
     const parent = mesh.parent || scene;
 
@@ -7977,6 +8093,25 @@ function deleteSelected() {
             redo() { removeSceneObject(mesh); },
         });
     }
+}
+
+// Lock prevents Move/Rotate/Scale (transformControls never attaches to a
+// locked object) and Delete — the primary real-world use of Lock in
+// SketchUp: protecting a finished piece from an accidental bump. Locked
+// objects stay fully selectable/inspectable, matching real SketchUp.
+function toggleLockSelected() {
+    const mesh = selectedObject;
+    const entry = mesh && sceneObjects.find(o => o.mesh === mesh);
+    if (!entry) { setVCB('Lock:', 'Select an object first'); return; }
+    entry.locked = !entry.locked;
+    if (entry.locked) transformControls.detach();
+    else if (currentInteractionMode === 'object' || currentInteractionMode === 'sketchup') transformControls.attach(mesh);
+    renderOutliner();
+    setVCB(entry.locked ? 'Locked:' : 'Unlocked:', entry.name);
+    pushUndo({
+        undo() { entry.locked = !entry.locked; renderOutliner(); if (selectedObject === mesh) selectObject(mesh); },
+        redo() { entry.locked = !entry.locked; renderOutliner(); if (selectedObject === mesh) selectObject(mesh); },
+    });
 }
 
 function newScene() {
@@ -8166,6 +8301,7 @@ function saveProjectFile() {
     const data = sceneToJSON();
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     downloadBlob(blob, '3DCore_Project.3dcore.json');
+    saveToRecentProjects('3DCore Project', data);
     setVCB('Saved:', '3DCore_Project.3dcore.json');
 }
 
@@ -8183,6 +8319,8 @@ function handleOpenProjectFile(evt) {
         try {
             const data = JSON.parse(e.target.result);
             loadSceneFromJSON(data);
+            const name = file.name.replace(/\.3dcore\.json$/i, '').replace(/\.json$/i, '') || 'Opened Project';
+            saveToRecentProjects(name, data);
             setVCB('Opened:', file.name);
         } catch (err) {
             alert('Could not open project file: ' + err.message);
@@ -8200,6 +8338,8 @@ const IDB_SESSION_KEY = 'autosave_session'; // background debounced autosave / r
                                              // debounced autosave (armed by every edit, incl. New Scene) could fire
                                              // ~1s later and silently overwrite an explicit Quick Save before the
                                              // user's next Quick Load read it back.
+const IDB_RECENTS_STORE = 'recent_projects'; // one real record per Save Project / Quick Save / Open Project — powers the Welcome screen's Recent list
+const IDB_RECENTS_CAP = 12;
 
 // Cache a single shared connection instead of opening a fresh one on every
 // call — each idbOpen() previously leaked a brand-new IndexedDB connection
@@ -8209,12 +8349,198 @@ let _idbConnPromise = null;
 function idbOpen() {
     if (_idbConnPromise) return _idbConnPromise;
     _idbConnPromise = new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
-        req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+        const req = indexedDB.open(IDB_NAME, 2);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+            if (!db.objectStoreNames.contains(IDB_RECENTS_STORE)) db.createObjectStore(IDB_RECENTS_STORE, { keyPath: 'id' });
+        };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => { _idbConnPromise = null; reject(req.error); };
     });
     return _idbConnPromise;
+}
+
+// Renders the CURRENT frame to a small JPEG data URL for a Recent-Projects
+// thumbnail. Must call renderer.render() and read the canvas back in the
+// same synchronous tick — this canvas has no preserveDrawingBuffer, so a
+// read any time after control returns to the event loop can capture a
+// stale/cleared buffer instead (bit this project once already, see
+// renderStillImage() above).
+function captureViewportThumbnail() {
+    try {
+        return withRenderResolution(320, 200, () => {
+            renderer.render(scene, camera);
+            return renderer.domElement.toDataURL('image/jpeg', 0.72);
+        });
+    } catch (err) {
+        console.error('Thumbnail capture failed:', err);
+        return null;
+    }
+}
+
+async function saveToRecentProjects(name, sceneData) {
+    const thumb = captureViewportThumbnail(); // synchronous — must happen before any await, see captureViewportThumbnail()
+    try {
+        const db = await idbOpen();
+        const record = { id: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name, thumb, timestamp: Date.now(), data: sceneData };
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_RECENTS_STORE, 'readwrite');
+            tx.objectStore(IDB_RECENTS_STORE).put(record);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+        const all = await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_RECENTS_STORE, 'readonly');
+            const req = tx.objectStore(IDB_RECENTS_STORE).getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+        if (all.length > IDB_RECENTS_CAP) {
+            const stale = all.sort((a, b) => a.timestamp - b.timestamp).slice(0, all.length - IDB_RECENTS_CAP);
+            const tx = db.transaction(IDB_RECENTS_STORE, 'readwrite');
+            const store = tx.objectStore(IDB_RECENTS_STORE);
+            stale.forEach(r => store.delete(r.id));
+            await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+        }
+    } catch (err) {
+        console.error('Saving to recent projects failed:', err);
+    }
+}
+
+async function getRecentProjects() {
+    try {
+        const db = await idbOpen();
+        const all = await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_RECENTS_STORE, 'readonly');
+            const req = tx.objectStore(IDB_RECENTS_STORE).getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+        return all.sort((a, b) => b.timestamp - a.timestamp);
+    } catch (err) {
+        console.error('Reading recent projects failed:', err);
+        return [];
+    }
+}
+
+async function deleteRecentProject(id) {
+    try {
+        const db = await idbOpen();
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_RECENTS_STORE, 'readwrite');
+            tx.objectStore(IDB_RECENTS_STORE).delete(id);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch (err) {
+        console.error('Deleting recent project failed:', err);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// WELCOME SCREEN — SketchUp-style startup dialog: Create New + a real
+// Recent Projects grid (thumbnail, name, last-modified) sourced from the
+// recent_projects IndexedDB store above. Shown on every launch; dismissing
+// it just leaves whatever's already in the viewport (the default scene, or
+// whatever tryAutoRestoreSession() silently restored) untouched.
+// ─────────────────────────────────────────────────────────────
+const WELCOME_PREF_KEY = '3dcore_show_welcome_on_startup';
+
+function toggleShowWelcomeOnStartup(show) {
+    try { localStorage.setItem(WELCOME_PREF_KEY, show ? '1' : '0'); } catch (err) { /* private-mode storage denial — non-fatal */ }
+}
+
+function formatRecentDate(ts) {
+    const d = new Date(ts);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
+        ', ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+async function showWelcomeScreen() {
+    const screen = document.getElementById('welcome-screen');
+    const grid = document.getElementById('welcome-recent-grid');
+    const empty = document.getElementById('welcome-recent-empty');
+    if (!screen || !grid) return;
+
+    const startupCheckbox = document.getElementById('welcome-startup-checkbox');
+    if (startupCheckbox) {
+        let showOnStartup = true;
+        try { showOnStartup = localStorage.getItem(WELCOME_PREF_KEY) !== '0'; } catch (err) { /* private-mode storage denial — default stays true */ }
+        startupCheckbox.checked = showOnStartup;
+    }
+
+    const recents = await getRecentProjects();
+    grid.innerHTML = '';
+    if (empty) empty.style.display = recents.length === 0 ? 'block' : 'none';
+
+    recents.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'welcome-recent-item';
+        item.style.cssText = 'cursor:pointer;';
+
+        const thumbWrap = document.createElement('div');
+        thumbWrap.style.cssText = 'position:relative;';
+        const img = document.createElement('img');
+        img.src = r.thumb || '';
+        img.style.cssText = 'width:100%; aspect-ratio:16/10; object-fit:cover; border-radius:4px; border:1px solid var(--b-border-light); background:#222; display:block;';
+        thumbWrap.appendChild(img);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.title = 'Remove from Recent';
+        removeBtn.textContent = '✕';
+        removeBtn.style.cssText = 'position:absolute; top:3px; right:3px; background:rgba(0,0,0,0.65); border:none; color:#ccc; width:16px; height:16px; border-radius:3px; font-size:9px; cursor:pointer; line-height:16px; padding:0;';
+        removeBtn.addEventListener('click', (evt) => {
+            evt.stopPropagation();
+            deleteRecentProject(r.id).then(showWelcomeScreen);
+        });
+        thumbWrap.appendChild(removeBtn);
+        item.appendChild(thumbWrap);
+
+        const nameEl = document.createElement('div');
+        nameEl.textContent = r.name;
+        nameEl.title = r.name;
+        nameEl.style.cssText = 'font-size:10px; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+        item.appendChild(nameEl);
+
+        const dateEl = document.createElement('div');
+        dateEl.textContent = formatRecentDate(r.timestamp);
+        dateEl.style.cssText = 'font-size:8.5px; color:var(--b-text-sub);';
+        item.appendChild(dateEl);
+
+        item.addEventListener('click', () => loadRecentProjectFromWelcome(r.id));
+        grid.appendChild(item);
+    });
+
+    screen.style.display = 'flex';
+}
+
+function closeWelcomeScreen() {
+    const screen = document.getElementById('welcome-screen');
+    if (screen) screen.style.display = 'none';
+}
+
+function startNewProjectFromWelcome() {
+    newScene();
+    closeWelcomeScreen();
+}
+
+async function loadRecentProjectFromWelcome(id) {
+    try {
+        const db = await idbOpen();
+        const record = await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_RECENTS_STORE, 'readonly');
+            const req = tx.objectStore(IDB_RECENTS_STORE).get(id);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        if (!record) { alert('That project is no longer available.'); return; }
+        loadSceneFromJSON(record.data);
+        closeWelcomeScreen();
+        setVCB('Opened:', record.name);
+    } catch (err) {
+        alert('Could not open project: ' + err.message);
+    }
 }
 
 async function saveProjectToBrowser(silent) {
@@ -8228,7 +8554,10 @@ async function saveProjectToBrowser(silent) {
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
         });
-        if (!silent) setVCB('Quick Save:', 'Saved to browser storage');
+        if (!silent) {
+            saveToRecentProjects('Quick Save', data);
+            setVCB('Quick Save:', 'Saved to browser storage');
+        }
     } catch (err) {
         if (silent) console.error('Autosave failed:', err);
         else alert('Quick save failed: ' + err.message);
@@ -8313,12 +8642,90 @@ function exportGLB() {
         );
     } catch (err) {
         alert('GLB export failed: ' + (err && err.message ? err.message : err));
+        return;
+    }
+}
+
+// Same export scope as exportGLB() above (top-level mesh objects) — a real
+// binary STL, for 3D printing or importing into a CAD kernel elsewhere.
+function exportSTL() {
+    const exportGroup = new THREE.Group();
+    sceneObjects
+        .filter(o => o.type === 'mesh' && o.mesh.isMesh)
+        .forEach(o => exportGroup.add(o.mesh.clone()));
+
+    if (exportGroup.children.length === 0) {
+        alert('Nothing to export — add a mesh object first.');
+        return;
+    }
+    exportGroup.updateMatrixWorld(true);
+
+    try {
+        const exporter = new THREE.STLExporter();
+        const result = exporter.parse(exportGroup, { binary: true });
+        const blob = new Blob([result], { type: 'model/stl' });
+        downloadBlob(blob, '3DCore_Project.stl');
+        setVCB('Exported:', '3DCore_Project.stl');
+    } catch (err) {
+        alert('STL export failed: ' + (err && err.message ? err.message : err));
     }
 }
 
 function triggerImportGLB() {
     const input = document.getElementById('file-import-glb');
     if (input) input.click();
+}
+
+function triggerImportImage() {
+    const input = document.getElementById('file-import-image');
+    if (input) input.click();
+}
+
+// Imports a raster image (e.g. a scanned/exported floorplan) as a flat,
+// unlit textured plane lying on the ground — a real tracing underlay, not
+// a decoration: it's a normal selectable/movable/scalable scene object, and
+// Tape Measure (see offerTapeMeasureRescale()) can calibrate the whole
+// model against a known real-world length drawn on it, exactly like real
+// SketchUp's "import image, then rescale" floorplan workflow.
+function handleImportImageFile(evt) {
+    const file = evt.target.files && evt.target.files[0];
+    evt.target.value = '';
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = e => {
+        const dataUrl = e.target.result;
+        const img = new Image();
+        img.onload = () => {
+            const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
+            const texture = new THREE.TextureLoader().load(dataUrl);
+            texture.encoding = THREE.sRGBEncoding;
+            const width = 10; // default footprint (world units) — user rescales via Scale tool or the Tape Measure calibration prompt
+            const height = width / aspect;
+            const geometry = new THREE.PlaneGeometry(width, height);
+            const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = nextName(file.name.replace(/\.(png|jpe?g|gif|webp|bmp)$/i, '') || 'Floorplan Image');
+            mesh.rotation.x = -Math.PI / 2; // lie flat, traced from Top view like a real floorplan underlay
+            mesh.position.set(0, 0.001, 0); // tiny lift to avoid z-fighting with the ground grid
+            mesh.userData.isReferenceImage = true;
+
+            scene.add(mesh);
+            sceneObjects.push({ name: mesh.name, type: 'mesh', mesh });
+            renderOutliner();
+            selectObject(mesh);
+            setVCB('Imported Image:', `${file.name} — ${formatLength(width, 2)} x ${formatLength(height, 2)} (Scale/Tape Measure to resize)`);
+
+            pushUndo({
+                undo() { removeSceneObject(mesh); },
+                redo() { scene.add(mesh); sceneObjects.push({ name: mesh.name, type: 'mesh', mesh }); renderOutliner(); selectObject(mesh); },
+            });
+        };
+        img.onerror = () => alert('Could not load image: ' + file.name);
+        img.src = dataUrl;
+    };
+    reader.onerror = () => alert('Could not read file: ' + file.name);
+    reader.readAsDataURL(file);
 }
 
 // Shared by file-picker GLB import and the Asset Library import — flattens
