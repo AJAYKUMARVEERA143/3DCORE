@@ -200,5 +200,44 @@ console.log('ok');
         self.assertNotIn("Export USDZ", html)
 
 
+class ClientPackTests(unittest.TestCase):
+    def test_zip_store_via_node(self):
+        import subprocess
+        script = r"""
+const Z = require('./web/js/zip_store.js');
+const bytes = Z.buildZip([
+  { name: 'hello.txt', data: 'hello' },
+  { name: 'n.txt', data: 'n' }
+]);
+if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) process.exit(2);
+const text = 'hello';
+const enc = new TextEncoder().encode(text);
+if (Z.crc32(enc) !== 0x3610a686) process.exit(3);
+const zipStr = String.fromCharCode.apply(null, Array.from(bytes));
+if (zipStr.indexOf('hello.txt') < 0) process.exit(4);
+if (zipStr.indexOf('PK') < 0) process.exit(5);
+console.log('ok');
+"""
+        proc = subprocess.run(
+            ["node", "-e", script],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ok", proc.stdout)
+
+    def test_pack_and_xr_hooks(self):
+        js = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function exportClientPack", js)
+        self.assertIn("function onXRControllerSelect", js)
+        self.assertIn("requestHitTestSource", js)
+        self.assertIn("js/zip_store.js", html)
+        self.assertIn("exportClientPack()", html)
+        self.assertIn("PACK", js)
+
+
 if __name__ == "__main__":
     unittest.main()

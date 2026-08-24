@@ -49,6 +49,7 @@
         <div class="top-menu-dropdown-item" onclick="triggerImportImage()">Import Image (Floorplan)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportOBJ()">Export OBJ <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportSTL()">Export STL <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exportClientPack()">Client Pack (ZIP)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="deleteAllGuides()">Delete All Guides <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
@@ -889,6 +890,7 @@
               </div>
               <button id="enter-vr-btn" onclick="enterVR()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Enter VR</button>
               <button id="enter-ar-btn" onclick="enterAR()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Place in AR</button>
+              <button onclick="exportClientPack()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Client Pack (ZIP)</button>
               <button onclick="takeViewportScreenshot()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Screenshot View (F10)</button>
               <button onclick="renderStillImage()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Render Image</button>
               <button onclick="renderAnimationVideo()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Animation (Video)</button>
@@ -1065,6 +1067,7 @@
   <button type="button" onclick="exportPresentSlidePng()">PNG</button>
   <button type="button" onclick="exportAllPresentSlides()">All PNG</button>
   <button type="button" onclick="exportPresentPathVideo()">Path Video</button>
+  <button type="button" onclick="exportClientPack()">Pack</button>
   <select id="present-xr-scale" onchange="setXRWorldScale(this.value)" title="VR/AR world scale">
     <option value="1" selected>1:1</option>
     <option value="0.1">1:10</option>
@@ -1076,6 +1079,7 @@
 </div>
 <script src="js/render_adapter.js"></script>
 <script src="js/format_io.js"></script>
+<script src="js/zip_store.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

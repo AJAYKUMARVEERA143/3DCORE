@@ -350,6 +350,7 @@ function renderTick(fromXR) {
     _lastFrameTime = now;
 
     if (fromXR) {
+        pollARHitTest();
         syncSectionPlane();
         renderer.render(scene, camera);
         return;
@@ -4813,6 +4814,7 @@ const CAD_COMMANDS = {
     IMPORTDXF: () => triggerImportDXF(), DXF: () => triggerImportDXF(),
     VR: () => enterVR(), ENTERVR: () => enterVR(),
     AR: () => enterAR(), ENTERAR: () => enterAR(),
+    PACK: () => exportClientPack(), CLIENTPACK: () => exportClientPack(), ZIP: () => exportClientPack(),
     ASSETS: () => openAssetLibrary(), LIBRARY: () => openAssetLibrary(),
 
     PRESENT: () => enterPresentMode(), PRES: () => enterPresentMode(),
@@ -9256,8 +9258,167 @@ function exportSTL() {
     setVCB('Exported:', '3DCore_Project.stl');
 }
 
+function dataUrlToBytes(dataUrl) {
+    const b64 = String(dataUrl || '').split(',')[1] || '';
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+
+function exportGLBBuffer() {
+    return new Promise((resolve, reject) => {
+        const exportGroup = new THREE.Group();
+        sceneObjects
+            .filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh)
+            .forEach(o => exportGroup.add(o.mesh.clone()));
+        if (exportGroup.children.length === 0) { resolve(null); return; }
+        const exporter = new THREE.GLTFExporter();
+        try {
+            exporter.parse(
+                exportGroup,
+                result => {
+                    if (!(result instanceof ArrayBuffer)) {
+                        reject(new Error('GLB exporter did not return binary data'));
+                        return;
+                    }
+                    resolve(result);
+                },
+                { binary: true }
+            );
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+async function exportClientPack() {
+    const Zip = window.ZipStore;
+    if (!Zip || !Zip.buildZip) {
+        alert('Zip builder failed to load (js/zip_store.js).');
+        return;
+    }
+    setVCB('Pack:', 'Building client zip…');
+    const files = [
+        {
+            name: 'README.txt',
+            data: [
+                '3D Core Studio — client pack',
+                '',
+                'project.3dcore.json  Open in 3D Core (File → Open Project).',
+                'preview.png          Still from the current camera (WebGL PBR, not a path tracer).',
+                'model.glb            Mesh export if the scene had meshes. Blender / Unity / phone AR viewers.',
+                '',
+                'Not included: USDZ, FBX, DWG, SKP, IFC. Those encoders are not in this app.',
+                'VR/AR is WebXR in a headset/phone browser on HTTPS or localhost — not a file in this zip.',
+            ].join('\n'),
+        },
+        { name: 'project.3dcore.json', data: JSON.stringify(sceneToJSON(), null, 2) },
+    ];
+    try {
+        const png = captureStillDataUrl(1280, 720);
+        if (png && png.indexOf('data:image/png') === 0) {
+            files.push({ name: 'preview.png', data: dataUrlToBytes(png) });
+        }
+    } catch (err) {
+        console.warn('Client pack preview failed:', err);
+    }
+    try {
+        const glb = await exportGLBBuffer();
+        if (glb) files.push({ name: 'model.glb', data: glb });
+    } catch (err) {
+        console.warn('Client pack GLB failed:', err);
+    }
+    const zipBytes = Zip.buildZip(files);
+    downloadBlob(new Blob([zipBytes], { type: 'application/zip' }), '3DCore_ClientPack.zip');
+    setVCB('Pack:', '3DCore_ClientPack.zip');
+}
+
 let xrWorldScale = 1;
 let xrActiveSession = null;
+let xrSessionKind = null;
+let xrHitTestSource = null;
+let xrARHitPose = null;
+let xrFrame = null;
+
+function xrMeshTargets() {
+    return sceneObjects.filter(o => o.mesh && o.mesh.isMesh).map(o => o.mesh);
+}
+
+function xrTeleportToWorldPoint(point) {
+    if (!point || !renderer || !renderer.xr) return;
+    const xrCam = renderer.xr.getCamera ? renderer.xr.getCamera() : camera;
+    if (xrCam && xrCam.updateMatrixWorld) xrCam.updateMatrixWorld();
+    const camPos = new THREE.Vector3();
+    if (xrCam && xrCam.getWorldPosition) xrCam.getWorldPosition(camPos);
+    else camPos.set(0, 0, 0);
+    scene.position.x += camPos.x - point.x;
+    scene.position.z += camPos.z - point.z;
+    markSceneDirty();
+}
+
+function onXRControllerSelect(ev) {
+    if (xrSessionKind === 'ar' && xrARHitPose) {
+        scene.position.set(xrARHitPose.x, xrARHitPose.y, xrARHitPose.z);
+        markSceneDirty();
+        setVCB('AR:', 'Placed on detected plane (trigger)');
+        return;
+    }
+    const ctrl = ev.target;
+    if (!ctrl || !ctrl.matrixWorld) return;
+    const origin = new THREE.Vector3().setFromMatrixPosition(ctrl.matrixWorld);
+    const dir = new THREE.Vector3(0, 0, -1).transformDirection(ctrl.matrixWorld);
+    _raycaster.set(origin, dir);
+    const hits = _raycaster.intersectObjects(xrMeshTargets(), true);
+    if (hits.length) {
+        xrTeleportToWorldPoint(hits[0].point);
+        setVCB('VR:', 'Teleported to surface');
+        return;
+    }
+    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    if (_raycaster.ray.intersectPlane(floor, hit)) {
+        xrTeleportToWorldPoint(hit);
+        setVCB('VR:', 'Teleported to floor');
+    }
+}
+
+function bindXRControllers() {
+    if (!renderer || !renderer.xr || !renderer.xr.getController) return;
+    [0, 1].forEach(i => {
+        const c = renderer.xr.getController(i);
+        if (!c.userData.xrSelectBound) {
+            c.addEventListener('select', onXRControllerSelect);
+            c.userData.xrSelectBound = true;
+        }
+        scene.add(c);
+    });
+}
+
+async function setupARHitTest(session) {
+    xrHitTestSource = null;
+    xrARHitPose = null;
+    try {
+        const viewerSpace = await session.requestReferenceSpace('viewer');
+        if (session.requestHitTestSource) {
+            xrHitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+        }
+    } catch (e) {
+        xrHitTestSource = null;
+    }
+}
+
+function pollARHitTest() {
+    if (!xrHitTestSource || !xrFrame || !renderer || !renderer.xr) return;
+    const ref = renderer.xr.getReferenceSpace ? renderer.xr.getReferenceSpace() : null;
+    if (!ref || !xrFrame.getHitTestResults) return;
+    const results = xrFrame.getHitTestResults(xrHitTestSource);
+    if (!results.length) return;
+    const pose = results[0].getPose(ref);
+    if (!pose || !pose.transform || !pose.transform.position) return;
+    const p = pose.transform.position;
+    xrARHitPose = { x: p.x, y: p.y, z: p.z };
+}
 
 function setXRWorldScale(value) {
     const n = parseFloat(value);
@@ -9280,6 +9441,7 @@ function applyXRScenePose(on) {
     } else {
         scene.rotation.x = 0;
         scene.scale.set(1, 1, 1);
+        scene.position.set(0, 0, 0);
     }
 }
 
@@ -9314,6 +9476,13 @@ async function refreshXRButtons() {
 function endXRSessionCleanup() {
     xrAnimating = false;
     xrActiveSession = null;
+    xrSessionKind = null;
+    xrARHitPose = null;
+    if (xrHitTestSource && xrHitTestSource.cancel) {
+        try { xrHitTestSource.cancel(); } catch (e) { /* already ended */ }
+    }
+    xrHitTestSource = null;
+    xrFrame = null;
     applyXRScenePose(false);
     if (orbitControls) orbitControls.enabled = true;
     if (renderer && renderer.setAnimationLoop) renderer.setAnimationLoop(null);
@@ -9329,17 +9498,23 @@ async function startXRSession(session, kind) {
         return;
     }
     xrActiveSession = session;
+    xrSessionKind = kind;
     applyXRScenePose(true);
     if (orbitControls) orbitControls.enabled = false;
     if (transformControls) transformControls.detach();
+    bindXRControllers();
+    if (kind === 'ar') await setupARHitTest(session);
     xrAnimating = true;
-    renderer.setAnimationLoop(() => renderTick(true));
+    renderer.setAnimationLoop((time, frame) => {
+        xrFrame = frame || null;
+        renderTick(true);
+    });
     session.addEventListener('end', endXRSessionCleanup);
     const maybePromise = renderer.xr.setSession(session);
     if (maybePromise && typeof maybePromise.then === 'function') await maybePromise;
     setVCB(kind === 'ar' ? 'AR:' : 'VR:', kind === 'ar'
-        ? 'Immersive AR session'
-        : 'Immersive VR session — 1 scene meter = 1 real meter at scale 1:1');
+        ? 'Immersive AR — pull trigger on a detected plane to place'
+        : 'Immersive VR — 1 scene meter = 1 real meter at 1:1. Trigger teleports');
 }
 
 async function enterVR() {
@@ -10419,6 +10594,7 @@ function showKeyboardShortcuts() {
             <b>Shift+D</b><span>Duplicate</span>
             <b>F5</b><span>Present mode (fullscreen client view)</span>
             <b>F10 / Ctrl+Shift+S</b><span>Screenshot current view (PNG)</span>
+            <b>PACK</b><span>Client zip (project + preview PNG + GLB)</span>
             <b>VR / AR commands</b><span>ENTERVR / ENTERAR (headset or GLB fallback)</span>
             <b>F12</b><span>Render (Rendered shading)</span>
             <b>Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y</b><span>Undo / Redo</span>
@@ -10474,14 +10650,15 @@ function openHelpDesk() {
             <li><b>GLB</b> — full scene round-trip (meshes + materials).</li>
             <li><b>OBJ / STL</b> — triangle meshes. STL is geometry only (3D print). These read and write real bytes from your file.</li>
             <li><b>DXF</b> — ASCII LINE and LWPOLYLINE only, turned into wall layers. Not DWG, and not a full CAD kernel.</li>
+            <li><b>Client pack (ZIP)</b> — project JSON + preview PNG + GLB (if meshes exist). File → Client Pack or command PACK. Not USDZ.</li>
             <li>FBX / SKP / IFC / USDZ are <b>not</b> in the menu because this app does not decode them yet.</li>
         </ul>
 
         <b>VR / AR</b>
         <ul style="margin:4px 0 10px 16px; padding:0;">
-            <li><b>Enter VR</b> starts a WebXR <code>immersive-vr</code> session when the browser reports one (Quest Browser, Chrome on a compatible headset). The scene is rotated from Z-up to Y-up for the headset. Scale 1:1 / 1:10 / 1:50 is in the Output panel.</li>
+            <li><b>Enter VR</b> starts a WebXR <code>immersive-vr</code> session when the browser reports one (Quest Browser, Chrome on a compatible headset). The scene is rotated from Z-up to Y-up for the headset. Scale 1:1 / 1:10 / 1:50 is in the Output panel. Controller trigger teleports onto a mesh or the floor.</li>
             <li>If VR is unavailable the button stays disabled — it does not fake a headset view.</li>
-            <li><b>Place in AR</b> uses WebXR <code>immersive-ar</code> when the phone supports it. Otherwise it exports a GLB for a phone AR viewer. There is no USDZ encoder and no webcam “fake AR”.</li>
+            <li><b>Place in AR</b> uses WebXR <code>immersive-ar</code> when the phone supports it. If hit-test is available, trigger places the model on a detected plane. Otherwise it exports a GLB for a phone AR viewer. There is no USDZ encoder and no webcam “fake AR”.</li>
             <li>WebXR needs HTTPS or <code>http://127.0.0.1</code>.</li>
         </ul>
 
