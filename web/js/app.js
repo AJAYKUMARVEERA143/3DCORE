@@ -9580,14 +9580,34 @@ async function tryAutoRestoreSession() {
     }
 }
 
+// EXPORT SCOPE — "Structure Only" (design idea studied from the Pascal
+// Editor reference project's Full Floor Plan / Structure Only export
+// toggle): walls/doors/windows/slabs, no furniture or decorative meshes.
+// A real category filter on userData.kind (set by the Wall/Opening tools)
+// plus the plain "Slab" name convention (slabs aren't kind-tagged) — not
+// a separate export path, just a shared predicate every exporter below
+// applies identically.
+let exportStructureOnly = false;
+function toggleExportStructureOnly(on) {
+    exportStructureOnly = on;
+    setVCB('Export Scope:', on ? 'Structure Only (walls/doors/windows/slabs)' : 'Full Model');
+}
+function isStructuralMesh(o) {
+    const kind = o.mesh && o.mesh.userData && o.mesh.userData.kind;
+    return kind === 'wall' || kind === 'door' || kind === 'window' || /^Slab(\.\d+)?$/.test(o.name);
+}
+function exportableMeshObjects() {
+    const all = sceneObjects.filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh);
+    return exportStructureOnly ? all.filter(isStructuralMesh) : all;
+}
+
 // ─────────────────────────────────────────────────────────────
 // GLB IMPORT / EXPORT — real glTF binary via three.js loader/exporter
 // (Phase 1: deterministic GLB round-trip in the browser)
 // ─────────────────────────────────────────────────────────────
 function exportGLB() {
     const exportGroup = new THREE.Group();
-    sceneObjects
-        .filter(o => o.type === 'mesh' && o.mesh.isMesh)
+    exportableMeshObjects()
         .forEach(o => exportGroup.add(o.mesh.clone()));
 
     if (exportGroup.children.length === 0) {
@@ -9728,7 +9748,7 @@ function handleImportGLBFile(evt) {
 
 function collectExportMeshSnapshots() {
     const snaps = [];
-    sceneObjects.filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh).forEach(o => {
+    exportableMeshObjects().forEach(o => {
         const geo = o.mesh.geometry.clone();
         o.mesh.updateMatrixWorld(true);
         geo.applyMatrix4(o.mesh.matrixWorld);
@@ -9882,9 +9902,7 @@ function dataUrlToBytes(dataUrl) {
 function exportGLBBuffer() {
     return new Promise((resolve, reject) => {
         const exportGroup = new THREE.Group();
-        sceneObjects
-            .filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh)
-            .forEach(o => exportGroup.add(o.mesh.clone()));
+        exportableMeshObjects().forEach(o => exportGroup.add(o.mesh.clone()));
         if (exportGroup.children.length === 0) { resolve(null); return; }
         const exporter = new THREE.GLTFExporter();
         try {
@@ -11234,6 +11252,42 @@ function setupContextMenu(canvas) {
 // ─────────────────────────────────────────────────────────────
 // HELP MENU — previously did nothing at all when clicked.
 // ─────────────────────────────────────────────────────────────
+// EXPLORE SCENE GRAPH — a real raw-hierarchy inspector (design idea
+// studied from the Pascal Editor reference project). Deliberately
+// different granularity than the Outliner: the Outliner only shows
+// top-level tracked sceneObjects entries, while this walks the actual
+// live THREE.Scene tree recursively — every child of a Wall
+// group/component, every side-mesh, anything nested — useful for seeing
+// what's REALLY in the scene, not just the named objects a user placed.
+function _escapeHtmlText(s) {
+    const div = document.createElement('div');
+    div.textContent = String(s);
+    return div.innerHTML;
+}
+function _sceneGraphNodeHtml(obj, depth) {
+    const kind = obj.userData && obj.userData.kind;
+    const label = obj.name || '(unnamed)';
+    const meta = [obj.type, kind ? `kind:${kind}` : null, obj.children.length ? `${obj.children.length} child(ren)` : null].filter(Boolean).join(' · ');
+    let html = `<div style="padding-left:${depth * 16}px; white-space:nowrap; font-family:monospace; font-size:10px; padding-top:2px;">`;
+    html += `<span style="color:${obj.visible ? '#ddd' : '#666'};">${_escapeHtmlText(label)}</span> <span style="color:var(--b-text-sub);">${_escapeHtmlText(meta)}</span>`;
+    html += `</div>`;
+    obj.children.forEach(c => { html += _sceneGraphNodeHtml(c, depth + 1); });
+    return html;
+}
+function exploreSceneGraph() {
+    // Rooted at the curated sceneObjects list, not the raw THREE.Scene tree
+    // — the latter is dominated by internal helpers (TransformControls'
+    // own gizmo, its handle sub-meshes, the ground grid, axis lines,
+    // selection outline) that have nothing to do with the user's actual
+    // model. Recursing into each tracked object's real children is where
+    // this genuinely goes deeper than the Outliner (a Wall's side meshes,
+    // a Group's members, anything nested) without the internal noise.
+    let html = '<div style="max-height:60vh; overflow-y:auto;">';
+    html += sceneObjects.map(o => _sceneGraphNodeHtml(o.mesh, 0)).join('');
+    html += '</div>';
+    showInfoModal(`Scene Graph — ${sceneObjects.length} tracked object(s)`, html);
+}
+
 function showInfoModal(title, html) {
     const t = document.getElementById('info-modal-title');
     const b = document.getElementById('info-modal-body');

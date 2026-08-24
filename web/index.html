@@ -47,6 +47,9 @@
         <div class="top-menu-dropdown-item" onclick="triggerImportOBJ()">Import OBJ… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="triggerImportSTL()">Import STL… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="triggerImportDXF()">Import DXF (ASCII walls)… <span class="kbd"></span></div>
+        <label class="top-menu-dropdown-item" style="display:flex; align-items:center; gap:6px; cursor:pointer;" title="Applies to every export below: GLB/OBJ/STL/Client Pack">
+          <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleExportStructureOnly(this.checked)"> Export: Structure Only <span class="kbd"></span>
+        </label>
         <div class="top-menu-dropdown-item" onclick="exportGLB()">Export GLB <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="triggerImportImage()">Import Image (Floorplan)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportOBJ()">Export OBJ <span class="kbd"></span></div>
@@ -56,6 +59,7 @@
         <div class="top-menu-dropdown-item" onclick="exportClientPack()">Client Pack (ZIP)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="deleteAllGuides()">Delete All Guides <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exploreSceneGraph()">Explore Scene Graph… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="enterVR()">Enter VR <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="enterAR()">Place in AR <span class="kbd"></span></div>
