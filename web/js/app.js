@@ -1128,6 +1128,7 @@ function cancelSketchTool() {
     _inferenceInfo = null;
     _axisLockDir = null;
     sketchState = null;
+    if (suCtx && suCanvas) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
 }
 
 // Adds a freshly-drawn object to the scene with full undo/redo, mirroring
@@ -2312,7 +2313,7 @@ function setupAdvancedEditTools(canvas) {
         }
     });
 
-    // Knife: 2 clicks on the selected face -> straight cut between them.
+    // Knife: click a polyline on the selected face; Enter (or double-click) cuts every segment.
     canvas.addEventListener('pointerup', e => {
         if (activeTool !== 'knife' || currentInteractionMode !== 'edit' || e.button !== 0) return;
         if (!selectedObject || !selectedObject.isMesh || selectedFaces.length === 0) return;
@@ -2324,29 +2325,20 @@ function setupAdvancedEditTools(canvas) {
         const hits = _raycaster.intersectObject(selectedObject, false);
         if (hits.length === 0) return;
 
+        const pt = hits[0].point.clone();
         if (!sketchState || sketchState.tool !== 'knife') {
-            sketchState = { tool: 'knife', points: [hits[0].point.clone()] };
-            setVCB('Knife:', 'Click second point on the same face');
+            sketchState = { tool: 'knife', points: [pt] };
+            drawKnifePreview();
+            setVCB('Knife:', 'Click more points on the face, Enter to cut, Esc to cancel');
             return;
         }
-        sketchState.points.push(hits[0].point.clone());
-        const [p1, p2] = sketchState.points;
-        sketchState = null;
-
-        const obj = selectedObject;
-        const beforeGeo = deepCloneGeometry(obj.geometry);
-        const beforeFaces = selectedFaces.slice();
-        if (knifeSelectedFace(obj, p1, p2)) {
-            const afterGeo = deepCloneGeometry(obj.geometry);
-            pushUndo({
-                undo() { obj.geometry.dispose(); obj.geometry = beforeGeo; selectedFaces = beforeFaces.slice(); rebuildFaceHighlight(); },
-                redo() { obj.geometry.dispose(); obj.geometry = afterGeo; rebuildFaceHighlight(); },
-            });
-            setVCB('Knife:', 'Cut applied');
-        } else {
-            beforeGeo.dispose();
-            setVCB('Knife:', 'Cut line missed the selected face');
+        sketchState.points.push(pt);
+        drawKnifePreview();
+        if (e.detail >= 2 && sketchState.points.length >= 2) {
+            finishKnife();
+            return;
         }
+        setVCB('Knife:', `${sketchState.points.length} points — Enter to cut, Esc to cancel`);
     });
 
     // Extrude to Cursor: one click on the viewport -> extrude the selected face to that point.
@@ -2381,20 +2373,77 @@ function setupAdvancedEditTools(canvas) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SELECT BOX / SELECT CIRCLE — builtin.select_box / builtin.select_circle.
-// This app's whole selection/inspector/material/delete/duplicate pipeline
-// is built around a single selectedObject, not a multi-object set, so
-// these are scoped to: drag a rectangle/circle region, select whichever
-// object's screen position is closest to the region's reference point
-// (rect center, or the circle's drag-start center) among those inside it
-// — a real, forgiving hit-region click rather than true multi-select.
+// SELECT BOX / CIRCLE / LASSO — object centroids in Object mode,
+// triangle centroids in Edit + Face select. Shift adds. Real region tests,
+// not a fake "closest only" click.
 // ─────────────────────────────────────────────────────────────
+function projectWorldToClient(world, rect) {
+    const v = world.clone().project(camera);
+    if (v.z > 1) return null;
+    return {
+        x: rect.left + (v.x * 0.5 + 0.5) * rect.width,
+        y: rect.top + (-v.y * 0.5 + 0.5) * rect.height
+    };
+}
+
+function collectFacesInRegion(mesh, testFn, rect) {
+    ensureNonIndexed(mesh);
+    const pos = mesh.geometry.attributes.position;
+    const triCount = Math.floor(pos.count / 3);
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), mid = new THREE.Vector3();
+    const hits = [];
+    for (let f = 0; f < triCount; f++) {
+        a.fromBufferAttribute(pos, f * 3);
+        b.fromBufferAttribute(pos, f * 3 + 1);
+        c.fromBufferAttribute(pos, f * 3 + 2);
+        mid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+        mesh.localToWorld(mid);
+        const scr = projectWorldToClient(mid, rect);
+        if (scr && testFn(scr.x, scr.y)) hits.push(f);
+    }
+    return hits;
+}
+
+function applyRegionObjectSelect(testFn, refPoint, rect, additive) {
+    const worldPos = new THREE.Vector3();
+    const hits = [];
+    sceneObjects.forEach(o => {
+        if (!o.mesh || o.mesh.name === '_cursor' || o.mesh.name === '_ar_reticle') return;
+        o.mesh.getWorldPosition(worldPos);
+        const scr = projectWorldToClient(worldPos, rect);
+        if (!scr || !testFn(scr.x, scr.y)) return;
+        const d = refPoint ? Math.hypot(scr.x - refPoint.x, scr.y - refPoint.y) : 0;
+        hits.push({ mesh: o.mesh, d });
+    });
+    hits.sort((a, b) => a.d - b.d);
+    if (!additive) outlinerMultiSelect.clear();
+    hits.forEach(h => outlinerMultiSelect.add(h.mesh));
+    const best = hits.length ? hits[0].mesh : null;
+    if (best) selectObject(best);
+    else if (!additive) selectObject(null);
+    return hits.length;
+}
+
+function applyRegionFaceSelect(testFn, rect, additive) {
+    if (!selectedObject || !selectedObject.isMesh) return 0;
+    const faces = collectFacesInRegion(selectedObject, testFn, rect);
+    if (!additive) selectedFaces = [];
+    faces.forEach(f => { if (!selectedFaces.includes(f)) selectedFaces.push(f); });
+    rebuildFaceHighlight();
+    return faces.length;
+}
+
 function setupBoxCircleSelect(canvas) {
     let start = null;
+    let lassoPts = null;
+
+    const isRegionTool = () => activeTool === 'select_box' || activeTool === 'select_circle' || activeTool === 'select_lasso';
 
     canvas.addEventListener('pointerdown', e => {
-        if ((activeTool !== 'select_box' && activeTool !== 'select_circle') || e.button !== 0) return;
+        if (!isRegionTool() || e.button !== 0) return;
+        if (orbitControls) orbitControls.enabled = false;
         start = { x: e.clientX, y: e.clientY };
+        lassoPts = activeTool === 'select_lasso' ? [{ x: e.clientX, y: e.clientY }] : null;
     });
 
     canvas.addEventListener('pointermove', e => {
@@ -2407,7 +2456,20 @@ function setupBoxCircleSelect(canvas) {
         suCtx.setLineDash([4, 3]);
         const sx0 = start.x - rect.left, sy0 = start.y - rect.top;
         const sx1 = e.clientX - rect.left, sy1 = e.clientY - rect.top;
-        if (activeTool === 'select_box') {
+        if (activeTool === 'select_lasso') {
+            const last = lassoPts[lassoPts.length - 1];
+            if (!last || Math.hypot(e.clientX - last.x, e.clientY - last.y) > 4) {
+                lassoPts.push({ x: e.clientX, y: e.clientY });
+            }
+            suCtx.beginPath();
+            lassoPts.forEach((p, i) => {
+                const x = p.x - rect.left, y = p.y - rect.top;
+                if (i === 0) suCtx.moveTo(x, y); else suCtx.lineTo(x, y);
+            });
+            suCtx.closePath();
+            suCtx.fill();
+            suCtx.stroke();
+        } else if (activeTool === 'select_box') {
             const x = Math.min(sx0, sx1), y = Math.min(sy0, sy1), w = Math.abs(sx1 - sx0), h = Math.abs(sy1 - sy0);
             suCtx.fillRect(x, y, w, h);
             suCtx.strokeRect(x, y, w, h);
@@ -2419,44 +2481,39 @@ function setupBoxCircleSelect(canvas) {
     });
 
     canvas.addEventListener('pointerup', e => {
-        if ((activeTool !== 'select_box' && activeTool !== 'select_circle') || e.button !== 0 || !start) return;
+        if (!isRegionTool() || e.button !== 0 || !start) return;
+        if (orbitControls) orbitControls.enabled = true;
         const end = { x: e.clientX, y: e.clientY };
         const dragDist = Math.hypot(end.x - start.x, end.y - start.y);
         const rect = canvas.getBoundingClientRect();
+        const MT = window.MeshTools;
 
-        let test, refPoint;
-        if (activeTool === 'select_box' && dragDist >= 5) {
+        let test, refPoint, label = 'Select:';
+        if (activeTool === 'select_lasso') {
+            label = 'Select Lasso:';
+            const pts = (lassoPts && lassoPts.length >= 3) ? lassoPts : [start, end, start];
+            test = (sx, sy) => MT && MT.pointInPolygon ? MT.pointInPolygon(sx, sy, pts) : false;
+            refPoint = start;
+        } else if (activeTool === 'select_box' && dragDist >= 5) {
+            label = 'Select Box:';
             const minX = Math.min(start.x, end.x), maxX = Math.max(start.x, end.x);
             const minY = Math.min(start.y, end.y), maxY = Math.max(start.y, end.y);
             test = (sx, sy) => sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;
             refPoint = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
         } else {
+            label = 'Select Circle:';
             const radius = dragDist >= 5 ? dragDist : 18;
             test = (sx, sy) => Math.hypot(sx - start.x, sy - start.y) <= radius;
             refPoint = start;
         }
 
-        const worldPos = new THREE.Vector3();
-        const hits = [];
-        sceneObjects.forEach(o => {
-            if (!o.mesh || o.mesh.name === '_cursor') return;
-            o.mesh.getWorldPosition(worldPos);
-            const proj = worldPos.clone().project(camera);
-            if (proj.z > 1) return; // behind the camera
-            const sx = rect.left + (proj.x * 0.5 + 0.5) * rect.width;
-            const sy = rect.top + (-proj.y * 0.5 + 0.5) * rect.height;
-            if (!test(sx, sy)) return;
-            const d = Math.hypot(sx - refPoint.x, sy - refPoint.y);
-            hits.push({ mesh: o.mesh, d });
-        });
-        hits.sort((a, b) => a.d - b.d);
-        if (!e.shiftKey) outlinerMultiSelect.clear();
-        hits.forEach(h => outlinerMultiSelect.add(h.mesh));
-        const best = hits.length ? hits[0].mesh : null;
-        if (best) selectObject(best);
-        else if (!e.shiftKey) selectObject(null);
-        setVCB(activeTool === 'select_box' ? 'Select Box:' : 'Select Circle:', hits.length ? `${hits.length} object(s)` : 'Nothing in region');
+        const faceMode = currentInteractionMode === 'edit' && faceSelectOn && selectedObject && selectedObject.isMesh;
+        let n = 0;
+        if (faceMode) n = applyRegionFaceSelect(test, rect, e.shiftKey);
+        else n = applyRegionObjectSelect(test, refPoint, rect, e.shiftKey);
+        setVCB(label, n ? `${n} ${faceMode ? 'face' : 'object'}(s)` : 'Nothing in region');
         start = null;
+        lassoPts = null;
         if (suCtx) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
     });
 }
@@ -3089,7 +3146,7 @@ const OFFSET_CURSOR_GLYPH =
     "<rect x='3' y='3' width='18' height='18'/><rect x='8' y='8' width='8' height='8'/></g>";
 const TOOL_CURSORS = {
     select: 'default', move: 'move', rotate: 'alias', scale: 'nwse-resize',
-    eraser: 'not-allowed', select_box: 'crosshair', select_circle: 'crosshair',
+    eraser: 'not-allowed', select_box: 'crosshair', select_circle: 'crosshair', select_lasso: 'crosshair',
     line: 'crosshair', rect: 'crosshair', circle: 'crosshair', arc: 'crosshair',
     polygon: 'crosshair', pie: 'crosshair', rotrect: 'crosshair',
     walk: 'move', lookaround: 'grab', position_camera: 'crosshair',
@@ -3313,6 +3370,7 @@ function setupKeyboard() {
                 else if (sketchState?.tool === 'polybuild') finishPolyBuild();
                 else if (sketchState?.tool === 'wall') finishWall();
                 else if (sketchState?.tool === 'slab') finishSlab();
+                else if (sketchState?.tool === 'knife') finishKnife();
                 break;
             }
             case 'Escape':
@@ -4791,6 +4849,10 @@ const CAD_COMMANDS = {
     ERASER: () => setActiveTool('eraser'),
 
     SELECT: () => setActiveTool('select'),
+    SELECTBOX: () => setActiveTool('select_box'), BOXSELECT: () => setActiveTool('select_box'),
+    SELECTCIRCLE: () => setActiveTool('select_circle'), CIRCLESELECT: () => setActiveTool('select_circle'),
+    LASSO: () => setActiveTool('select_lasso'), SELECTLASSO: () => setActiveTool('select_lasso'),
+    KNIFE: () => setActiveTool('knife'),
     MOVE: () => setActiveTool('move'), M: () => setActiveTool('move'),
     ROTATE: () => setActiveTool('rotate'), RO: () => setActiveTool('rotate'),
     SCALE: () => setActiveTool('scale'), SC: () => setActiveTool('scale'),
@@ -6608,12 +6670,14 @@ function fixTriWinding(a, b, c, refNormal) {
 // of 3) of mesh.geometry against a LOCAL-space plane, replacing them with
 // the re-triangulated pieces on both sides. Triangles not in the given set
 // pass through unchanged. Returns true if anything was actually cut.
-function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
+function clipTrianglesToPlane(mesh, triangleIndices, localPlane, collectedFaces) {
     ensureNonIndexed(mesh);
     const geo = mesh.geometry;
     const posAttr = geo.attributes.position;
     const triSet = new Set(triangleIndices.map(f => f * 3));
     const outPositions = [];
+    const newSelected = [];
+    let outTri = 0;
     let didCut = false;
 
     for (let i = 0; i < posAttr.count; i += 3) {
@@ -6623,6 +6687,7 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
 
         if (!triSet.has(i)) {
             outPositions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+            outTri++;
             continue;
         }
 
@@ -6631,8 +6696,9 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
         const negPoly = clipTriangleToPlane([a, b, c], localPlane, false);
 
         if (posPoly.length < 3 || negPoly.length < 3) {
-            // Entirely on one side (or degenerate) — keep the original triangle.
             outPositions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+            newSelected.push(outTri);
+            outTri++;
             continue;
         }
         didCut = true;
@@ -6640,6 +6706,8 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
             for (let k = 1; k < poly.length - 1; k++) {
                 const [p0, p1, p2] = fixTriWinding(poly[0], poly[k], poly[k + 1], refNormal);
                 outPositions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+                newSelected.push(outTri);
+                outTri++;
             }
         });
     }
@@ -6651,6 +6719,10 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
     newGeo.computeVertexNormals();
     geo.dispose();
     mesh.geometry = newGeo;
+    if (collectedFaces) {
+        collectedFaces.length = 0;
+        newSelected.forEach(f => collectedFaces.push(f));
+    }
     return true;
 }
 
@@ -6720,7 +6792,62 @@ function knifeSelectedFace(mesh, p1World, p2World) {
     const planeNormal = lineDir.clone().cross(avgNormal).normalize();
     const localPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, p1);
 
-    return clipTrianglesToPlane(mesh, selectedFaces, localPlane);
+    const nextFaces = [];
+    const ok = clipTrianglesToPlane(mesh, selectedFaces, localPlane, nextFaces);
+    if (ok && nextFaces.length) selectedFaces = nextFaces;
+    return ok;
+}
+
+function drawKnifePreview() {
+    if (!suCtx || !suCanvas || !camera) return;
+    suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
+    if (!sketchState || sketchState.tool !== 'knife' || !sketchState.points || sketchState.points.length === 0) return;
+    const rect = suCanvas.getBoundingClientRect();
+    suCtx.strokeStyle = '#ffcc44';
+    suCtx.fillStyle = '#ffcc44';
+    suCtx.lineWidth = 1.5;
+    suCtx.setLineDash([5, 3]);
+    suCtx.beginPath();
+    sketchState.points.forEach((p, i) => {
+        const scr = projectWorldToClient(p, rect);
+        if (!scr) return;
+        const x = scr.x - rect.left, y = scr.y - rect.top;
+        if (i === 0) suCtx.moveTo(x, y); else suCtx.lineTo(x, y);
+        suCtx.fillRect(x - 2, y - 2, 4, 4);
+    });
+    suCtx.stroke();
+    suCtx.setLineDash([]);
+}
+
+function finishKnife() {
+    if (!sketchState || sketchState.tool !== 'knife' || !sketchState.points || sketchState.points.length < 2) {
+        setVCB('Knife:', 'Need 2+ points, then Enter');
+        return;
+    }
+    const obj = selectedObject;
+    if (!obj || !obj.isMesh) { cancelSketchTool(); return; }
+    const pts = sketchState.points.slice();
+    const beforeGeo = deepCloneGeometry(obj.geometry);
+    const beforeFaces = selectedFaces.slice();
+    let cuts = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+        if (knifeSelectedFace(obj, pts[i], pts[i + 1])) cuts++;
+    }
+    sketchState = null;
+    if (suCtx) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
+    if (cuts) {
+        const afterGeo = deepCloneGeometry(obj.geometry);
+        const afterFaces = selectedFaces.slice();
+        pushUndo({
+            undo() { obj.geometry.dispose(); obj.geometry = beforeGeo; selectedFaces = beforeFaces.slice(); rebuildFaceHighlight(); },
+            redo() { obj.geometry.dispose(); obj.geometry = afterGeo; selectedFaces = afterFaces.slice(); rebuildFaceHighlight(); },
+        });
+        rebuildFaceHighlight();
+        setVCB('Knife:', `${cuts} cut(s) on selected face`);
+    } else {
+        beforeGeo.dispose();
+        setVCB('Knife:', 'Cut line missed the selected face');
+    }
 }
 
 // Loop Cut (scoped to a single selected quad face — the common case, a box
@@ -9447,6 +9574,24 @@ let xrActiveSession = null;
 let xrSessionKind = null;
 let xrHitTestSource = null;
 let xrARHitPose = null;
+let xrARReticle = null;
+
+function ensureARReticle() {
+    if (xrARReticle) return xrARReticle;
+    const geo = new THREE.RingGeometry(0.06, 0.09, 32);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x88e0ff, side: THREE.DoubleSide, depthTest: false,
+        transparent: true, opacity: 0.9
+    });
+    xrARReticle = new THREE.Mesh(geo, mat);
+    xrARReticle.name = '_ar_reticle';
+    xrARReticle.renderOrder = 1000;
+    xrARReticle.visible = false;
+    xrARReticle.raycast = function () {};
+    scene.add(xrARReticle);
+    return xrARReticle;
+}
 let xrFrame = null;
 
 function xrMeshTargets() {
@@ -9521,11 +9666,35 @@ function pollARHitTest() {
     const ref = renderer.xr.getReferenceSpace ? renderer.xr.getReferenceSpace() : null;
     if (!ref || !xrFrame.getHitTestResults) return;
     const results = xrFrame.getHitTestResults(xrHitTestSource);
-    if (!results.length) return;
+    if (!results.length) {
+        xrARHitPose = null;
+        if (xrARReticle) xrARReticle.visible = false;
+        return;
+    }
     const pose = results[0].getPose(ref);
-    if (!pose || !pose.transform || !pose.transform.position) return;
+    if (!pose || !pose.transform || !pose.transform.position) {
+        xrARHitPose = null;
+        if (xrARReticle) xrARReticle.visible = false;
+        return;
+    }
     const p = pose.transform.position;
     xrARHitPose = { x: p.x, y: p.y, z: p.z };
+    const ring = ensureARReticle();
+    const world = new THREE.Vector3(p.x, p.y, p.z);
+    if (ring.parent) ring.parent.worldToLocal(world);
+    ring.position.copy(world);
+    const o = pose.transform.orientation;
+    if (o) {
+        const qWorld = new THREE.Quaternion(o.x, o.y, o.z, o.w);
+        if (ring.parent) {
+            const qParent = new THREE.Quaternion();
+            ring.parent.getWorldQuaternion(qParent);
+            ring.quaternion.copy(qParent.invert()).multiply(qWorld);
+        } else {
+            ring.quaternion.copy(qWorld);
+        }
+    }
+    ring.visible = true;
 }
 
 function setXRWorldScale(value) {
@@ -9586,6 +9755,7 @@ function endXRSessionCleanup() {
     xrActiveSession = null;
     xrSessionKind = null;
     xrARHitPose = null;
+    if (xrARReticle) xrARReticle.visible = false;
     if (xrHitTestSource && xrHitTestSource.cancel) {
         try { xrHitTestSource.cancel(); } catch (e) { /* already ended */ }
     }
@@ -10690,6 +10860,8 @@ function showKeyboardShortcuts() {
             <b>L</b><span>Select Linked (Edit + Face) / Line (SketchUp CAD)</span>
             <b>Ctrl+= / Ctrl+-</b><span>Grow / shrink face selection</span>
             <b>PE chip</b><span>Proportional object translate falloff</span>
+            <b>Lasso / Box / Circle</b><span>Region select — objects, or faces in Edit+Face. Shift adds</span>
+            <b>Knife</b><span>Click a polyline on a selected face, Enter to cut</span>
             <b>C</b><span>Circle tool (SketchUp CAD workspace)</span>
             <b>A</b><span>Arc tool (SketchUp CAD) — elsewhere: Select All / Deselect</span>
             <b>P / U</b><span>Push/Pull tool</span>

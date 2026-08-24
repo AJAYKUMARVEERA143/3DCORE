@@ -133,6 +133,22 @@
         return t * t;
     }
 
+    function pointInPolygon(x, y, pts) {
+        if (!pts || pts.length < 3) return false;
+        var inside = false;
+        var j = pts.length - 1;
+        for (var i = 0; i < pts.length; i++) {
+            var xi = pts[i].x, yi = pts[i].y;
+            var xj = pts[j].x, yj = pts[j].y;
+            var denom = (yj - yi);
+            var hit = ((yi > y) !== (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / (denom === 0 ? 1e-12 : denom) + xi);
+            if (hit) inside = !inside;
+            j = i;
+        }
+        return inside;
+    }
+
     var api = {
         vertexKey: vertexKey,
         faceCount: faceCount,
@@ -140,7 +156,8 @@
         growFaceSelection: growFaceSelection,
         shrinkFaceSelection: shrinkFaceSelection,
         selectLinkedFaces: selectLinkedFaces,
-        falloffWeight: falloffWeight
+        falloffWeight: falloffWeight,
+        pointInPolygon: pointInPolygon
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
