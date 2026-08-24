@@ -357,6 +357,16 @@
       <span class="hud-collection-info" id="hud-col-info">(1) Collection | Cube</span>
     </div>
 
+    <!-- Bottom-Left Camera Controls Legend + Align to North (design idea studied from the Pascal Editor reference project) -->
+    <div style="position:absolute; left:12px; bottom:12px; z-index:50; display:flex; align-items:flex-end; gap:8px; pointer-events:none;">
+      <button onclick="setViewAngle('front')" title="Align View to North (matches the ViewCube's N face)" style="pointer-events:auto; width:30px; height:30px; border-radius:50%; background:rgba(20,20,20,0.75); border:1px solid var(--b-border-light); color:#eee; font-size:10px; font-weight:700; cursor:pointer;">N</button>
+      <div style="pointer-events:none; background:rgba(20,20,20,0.6); border:1px solid var(--b-border-light); border-radius:4px; padding:5px 9px; font-size:9px; color:var(--b-text-sub); line-height:1.6;">
+        <div><b style="color:#ccc;">Orbit</b> Middle-click drag</div>
+        <div><b style="color:#ccc;">Pan</b> Right-click drag</div>
+        <div><b style="color:#ccc;">Zoom</b> Scroll wheel</div>
+      </div>
+    </div>
+
     <!-- Navigation Bubble Gizmo & Camera Tools (Top Right) -->
     <div class="viewport-nav-bubble-gizmo">
       <div class="viewcube-wrap">
@@ -521,6 +531,20 @@
               <div class="prop-numeric-row"><span class="prop-label">Vertices</span><span id="entity-info-verts">—</span></div>
               <div class="prop-numeric-row"><span class="prop-label">Triangles</span><span id="entity-info-tris">—</span></div>
               <div class="prop-numeric-row"><span class="prop-label">Area</span><span id="entity-info-area">—</span></div>
+            </div>
+          </div>
+          <div class="b-accordion-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Levels</div>
+            <div class="b-accordion-content" style="display:block;">
+              <div id="levels-list" style="display:flex; flex-direction:column; gap:2px;"></div>
+              <div style="display:flex; gap:4px; margin-top:6px;">
+                <button class="transport-btn" style="flex:1;" onclick="addLevelBelow()" title="Insert a new level below the active one">↓ Add Below</button>
+                <button class="transport-btn" style="flex:1;" onclick="addLevelAbove()" title="Insert a new level above the active one">↑ Add Above</button>
+                <button class="transport-btn" onclick="removeActiveLevel()" title="Remove the active level">✕</button>
+              </div>
+              <label style="display:flex; align-items:center; gap:5px; margin-top:6px; font-size:10px; color:var(--b-text-sub); cursor:pointer;">
+                <input type="checkbox" onchange="toggleLevelIsolate(this.checked)"> Isolate active level (hide other floors)
+              </label>
             </div>
           </div>
           <div class="b-accordion-box">

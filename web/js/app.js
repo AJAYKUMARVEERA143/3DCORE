@@ -357,6 +357,7 @@ function initApp() {
     renderModifierAddPanel();
     renderLayersPanel();
     populateLayerSelect();
+    renderLevelsPanel();
 
     window.addEventListener('resize', fitCanvas);
     renderLoop();
@@ -1136,13 +1137,14 @@ function cancelSketchTool() {
 // Adds a freshly-drawn object to the scene with full undo/redo, mirroring
 // the pattern addPrimitive() already uses.
 function commitNewObject(obj, type) {
+    const level = activeLevelIndex;
     scene.add(obj);
-    sceneObjects.push({ name: obj.name, type, mesh: obj });
+    sceneObjects.push({ name: obj.name, type, mesh: obj, level });
     renderOutliner();
     selectObject(obj);
     pushUndo({
         undo() { removeSceneObject(obj); },
-        redo() { scene.add(obj); sceneObjects.push({ name: obj.name, type, mesh: obj }); renderOutliner(); selectObject(obj); },
+        redo() { scene.add(obj); sceneObjects.push({ name: obj.name, type, mesh: obj, level }); renderOutliner(); selectObject(obj); },
     });
 }
 
@@ -1664,7 +1666,11 @@ function buildWallSegmentMesh(p0, p1, thickness, height) {
     dir.normalize();
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, thickness, height));
     const mid = p0.clone().lerp(p1, 0.5);
-    mesh.position.set(mid.x, mid.y, height / 2);
+    // Extrude upward from the clicked points' own Z (their floor elevation),
+    // not always from world Z=0 — previously hardcoded to `height / 2`,
+    // which silently ground-locked every wall regardless of what level it
+    // was drawn on.
+    mesh.position.set(mid.x, mid.y, mid.z + height / 2);
     mesh.rotation.z = Math.atan2(dir.y, dir.x);
     mesh.updateMatrix();
     return mesh;
@@ -1723,19 +1729,18 @@ function createWallMeshesFromPoints(pts) {
         seg.name = nextBatchName('WallLayer', createdMeshes.map(m => m.name));
         seg.userData.kind = 'wall';
         seg.userData.wall = { x1: ax, y1: ay, x2: bx, y2: by, thickness: wallSettings.thickness, height: wallSettings.height };
-        const z0 = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].z : 0;
-        if (z0) {
-            seg.geometry.translate(0, 0, z0);
-            seg.geometry.computeVertexNormals();
-        }
+        // No level-elevation offset needed here: `pts` already came from a
+        // raycast against `_groundPlane`, which setActiveLevel() keeps at
+        // the active level's real elevation — see the Levels section above.
         createdMeshes.push(seg);
     }
     return createdMeshes;
 }
 function commitWallMeshes(createdMeshes, statusLabel) {
     if (!createdMeshes.length) return;
+    const level = activeLevelIndex;
     const addAll = () => {
-        createdMeshes.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); });
+        createdMeshes.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m, level }); });
         renderOutliner();
     };
     addAll();
@@ -2873,6 +2878,122 @@ function populateLayerSelect() {
     const entry = selectedObject && sceneObjects.find(o => o.mesh === selectedObject);
     const current = entry ? (entry.layer || 'Untagged') : 'Untagged';
     sel.innerHTML = sceneLayers.map(name => `<option value="${name}" ${name === current ? 'selected' : ''}>${name}</option>`).join('');
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEVELS / STOREYS — real BIM floor stacking (design idea studied from the
+// Pascal Editor reference project's clean Levels UI). Each level has a
+// name, a wall height, and a computed elevation (sum of every lower
+// level's height) — not independent numbers a user could desync. Drawing
+// tools (Wall/Slab/Opening/Line/etc.) all fall back to the same shared
+// `_groundPlane` for empty-space raycasts, so retargeting that one plane's
+// constant to the active level's elevation makes every existing tool
+// level-aware for free, with no per-tool plumbing. New objects are tagged
+// with the level they were created on; editing a lower level's height
+// physically shifts every object on a higher level by the real delta,
+// matching how real BIM software keeps floors associative.
+// ─────────────────────────────────────────────────────────────
+let buildingLevels = [{ name: 'Ground Floor', height: 3.0 }];
+let activeLevelIndex = 0;
+
+function levelElevation(index) {
+    let z = 0;
+    for (let i = 0; i < index; i++) z += buildingLevels[i].height;
+    return z;
+}
+
+function setActiveLevel(index) {
+    if (index < 0 || index >= buildingLevels.length) return;
+    activeLevelIndex = index;
+    const z = levelElevation(index);
+    _groundPlane.constant = -z;
+    if (groundGrid) groundGrid.position.z = z;
+    renderLevelsPanel();
+    if (typeof refreshHudContext === 'function') refreshHudContext();
+    setVCB('Level:', buildingLevels[index].name);
+}
+
+function addLevelAbove() {
+    const at = activeLevelIndex;
+    buildingLevels.splice(at + 1, 0, { name: nextLevelName(), height: 3.0 });
+    setActiveLevel(at + 1);
+}
+
+function addLevelBelow() {
+    const at = activeLevelIndex;
+    buildingLevels.splice(at, 0, { name: nextLevelName(), height: 3.0 });
+    // Every existing object (including Ground Floor's own) needs to shift up
+    // by the new level's height so it visually stays on its real level.
+    const delta = buildingLevels[at].height;
+    sceneObjects.forEach(o => { if (typeof o.level === 'number' && o.level >= at) o.mesh.position.z += delta; });
+    sceneObjects.forEach(o => { if (typeof o.level === 'number' && o.level >= at) o.level += 1; });
+    setActiveLevel(at);
+}
+
+function nextLevelName() {
+    let n = buildingLevels.length + 1, name;
+    do { name = `Level ${n}`; n++; } while (buildingLevels.some(l => l.name === name));
+    return name;
+}
+
+function removeActiveLevel() {
+    if (buildingLevels.length <= 1) { setVCB('Levels:', 'At least one level is required'); return; }
+    const idx = activeLevelIndex;
+    const hasContent = sceneObjects.some(o => o.level === idx);
+    if (hasContent && !confirm(`${buildingLevels[idx].name} has objects on it. Delete the level anyway? (objects are NOT deleted, just left at their current height)`)) return;
+    buildingLevels.splice(idx, 1);
+    sceneObjects.forEach(o => { if (typeof o.level === 'number' && o.level > idx) o.level -= 1; });
+    setActiveLevel(Math.min(idx, buildingLevels.length - 1));
+}
+
+function renameLevel(index, name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed || !buildingLevels[index]) return;
+    buildingLevels[index].name = trimmed;
+    renderLevelsPanel();
+}
+
+// Changing a level's height re-derives every level above it and physically
+// shifts their objects by the real delta — the elevation numbers and the
+// actual geometry never drift apart.
+function setLevelHeight(index, height) {
+    const h = parseFloat(height);
+    if (!isFinite(h) || h <= 0 || !buildingLevels[index]) return;
+    const delta = h - buildingLevels[index].height;
+    buildingLevels[index].height = h;
+    if (Math.abs(delta) > 1e-9) {
+        sceneObjects.forEach(o => { if (typeof o.level === 'number' && o.level > index) o.mesh.position.z += delta; });
+    }
+    setActiveLevel(activeLevelIndex); // re-derive _groundPlane/groundGrid from the (possibly changed) active elevation
+}
+
+function toggleLevelIsolate(enabled) {
+    _levelIsolateOn = enabled;
+    applyLevelVisibility();
+}
+let _levelIsolateOn = false;
+
+function applyLevelVisibility() {
+    sceneObjects.forEach(o => {
+        if (typeof o.level !== 'number') return; // objects created before Levels existed, or not level-tagged (lights/camera) — never hidden by this
+        const shouldShow = !_levelIsolateOn || o.level === activeLevelIndex;
+        if (o.mesh.visible !== shouldShow) o.mesh.visible = shouldShow;
+    });
+    renderOutliner();
+}
+
+function renderLevelsPanel() {
+    const list = document.getElementById('levels-list');
+    if (!list) return;
+    list.innerHTML = buildingLevels.map((lvl, i) => {
+        const isActive = i === activeLevelIndex;
+        return `
+            <div class="levels-row ${isActive ? 'active' : ''}" style="display:flex; align-items:center; gap:4px; padding:3px 4px; border-radius:3px; ${isActive ? 'background:var(--b-accent-soft, rgba(74,111,232,0.25));' : ''} cursor:pointer;" onclick="setActiveLevel(${i})">
+                <input type="text" value="${lvl.name}" style="flex:1; min-width:0; background:transparent; border:none; color:#eee; font-size:10.5px; padding:2px;" onclick="event.stopPropagation()" onchange="renameLevel(${i}, this.value)">
+                <input type="number" value="${lvl.height.toFixed(2)}" step="0.1" min="0.1" title="Wall height (m)" style="width:52px; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#ddd; font-size:10px; padding:2px; border-radius:2px;" onclick="event.stopPropagation()" onchange="setLevelHeight(${i}, this.value)">
+                <span style="font-size:8.5px; color:var(--b-text-sub); width:44px; text-align:right;">${levelElevation(i).toFixed(2)}m</span>
+            </div>`;
+    }).join('');
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -5075,18 +5196,21 @@ function addPrimitive(type) {
     const count = sceneObjects.filter(o => o.name.startsWith(label)).length;
     mesh.name = count === 0 ? label : `${label}.${String(count).padStart(3, '0')}`;
 
-    // Place near cursor / slightly offset if something else is at origin
-    mesh.position.set(0, 0, 0);
+    // Place near cursor / slightly offset if something else is at origin.
+    // Z defaults to the active level's elevation (0 on Ground Floor —
+    // identical to the pre-Levels behavior of always spawning at z=0).
+    const level = activeLevelIndex;
+    mesh.position.set(0, 0, levelElevation(level));
 
     scene.add(mesh);
-    sceneObjects.push({ name: mesh.name, type: 'mesh', mesh });
+    sceneObjects.push({ name: mesh.name, type: 'mesh', mesh, level });
     renderOutliner();
     selectObject(mesh);
     setVCB('Added:', mesh.name);
 
     pushUndo({
         undo() { removeSceneObject(mesh); },
-        redo() { scene.add(mesh); sceneObjects.push({ name: mesh.name, type: 'mesh', mesh }); renderOutliner(); selectObject(mesh); },
+        redo() { scene.add(mesh); sceneObjects.push({ name: mesh.name, type: 'mesh', mesh, level }); renderOutliner(); selectObject(mesh); },
     });
 }
 
@@ -6427,9 +6551,6 @@ function fillSelectedHole() {
     setVCB('Fill:', `${extra.length / 9} triangle(s) from boundary fan — not a n-gon fill`);
 }
 
-let bimLevels = [{ name: 'Level 0', z: 0 }];
-let bimActiveLevel = 0;
-
 function collectWallSegments() {
     const segs = [];
     sceneObjects.forEach(o => {
@@ -6448,7 +6569,8 @@ function makeRoomsFromWalls() {
     if (segs.length < 3) { setVCB('Rooms:', 'Need 3+ wall segments with stored plan data (draw walls after this update)'); return; }
     const loops = BK.loopsFromSegments(segs);
     if (!loops.length) { setVCB('Rooms:', 'No closed wall loop found'); return; }
-    const z = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].z : 0;
+    const z = levelElevation(activeLevelIndex);
+    const level = activeLevelIndex;
     const created = [];
     loops.forEach((loop, i) => {
         const area = BK.polygonArea(loop);
@@ -6460,7 +6582,7 @@ function makeRoomsFromWalls() {
         mesh.position.z = z + 0.02;
         mesh.name = nextName('Room');
         mesh.userData.kind = 'room';
-        mesh.userData.room = { area: area, level: bimLevels[bimActiveLevel].name };
+        mesh.userData.room = { area: area, level: buildingLevels[activeLevelIndex].name };
         mesh.userData.skipRaycast = false;
         created.push(mesh);
         const spr = createDimensionSprite(`${area.toFixed(1)} m²`);
@@ -6468,11 +6590,11 @@ function makeRoomsFromWalls() {
         mesh.add(spr);
     });
     if (!created.length) { setVCB('Rooms:', 'Loops were too small'); return; }
-    created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); });
+    created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m, level }); });
     renderOutliner();
     pushUndo({
         undo() { created.forEach(m => removeSceneObject(m)); },
-        redo() { created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); }); renderOutliner(); },
+        redo() { created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m, level }); }); renderOutliner(); },
     });
     setVCB('Rooms:', `${created.length} room slab(s) from closed walls`);
 }
@@ -6507,32 +6629,16 @@ function addOpeningComponent(kind) {
 function addDoorComponent() { addOpeningComponent('door'); }
 function addWindowComponent() { addOpeningComponent('window'); }
 
-function addStorey() {
-    const last = bimLevels[bimLevels.length - 1];
-    const z = (last ? last.z : 0) + 3;
-    const name = 'Level ' + bimLevels.length;
-    bimLevels.push({ name, z });
-    bimActiveLevel = bimLevels.length - 1;
-    refreshHudContext();
-    setVCB('Level:', `${name} at z=${z} m — new walls sit on this storey`);
-}
-
-function setActiveStorey(i) {
-    bimActiveLevel = Math.max(0, Math.min(bimLevels.length - 1, i | 0));
-    refreshHudContext();
-    setVCB('Level:', bimLevels[bimActiveLevel].name);
-}
-
-function isolateActiveStorey(on) {
-    const z = bimLevels[bimActiveLevel].z;
-    sceneObjects.forEach(o => {
-        if (!o.mesh) return;
-        const box = new THREE.Box3().setFromObject(o.mesh);
-        const mid = (box.min.z + box.max.z) * 0.5;
-        o.mesh.visible = !on || Math.abs(mid - (z + 1.35)) < 2.2 || (o.mesh.userData && o.mesh.userData.kind === 'room' && o.mesh.userData.room && o.mesh.userData.room.level === bimLevels[bimActiveLevel].name);
-    });
-    setVCB('Level:', on ? `Isolating ${bimLevels[bimActiveLevel].name}` : 'All storeys visible');
-}
+// addStorey/setActiveStorey/isolateActiveStorey are the BIM Architecture
+// tab's original entry points into Levels — kept as real aliases onto the
+// consolidated buildingLevels/activeLevelIndex system (see the Levels
+// section, added later, which does real per-object level tagging and
+// height-cascading instead of this trio's original Z-midpoint-guessing
+// isolate heuristic) so both UIs drive the exact same data, not two
+// silently-diverging level lists.
+function addStorey() { addLevelAbove(); }
+function setActiveStorey(i) { setActiveLevel(i); }
+function isolateActiveStorey(on) { toggleLevelIsolate(on); }
 
 function exportScheduleCsv() {
     const BK = window.BimKit;
@@ -6618,7 +6724,7 @@ function lookThroughSelectedCamera() {
 function refreshHudContext() {
     const el = document.getElementById('hud-context');
     if (!el) return;
-    const lvl = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].name : 'Level 0';
+    const lvl = buildingLevels[activeLevelIndex] ? buildingLevels[activeLevelIndex].name : 'Ground Floor';
     const cam = sceneObjects.find(o => o.mesh && o.mesh.userData && o.mesh.userData.kind === 'camera');
     el.textContent = `${lvl}${cam ? ' · ' + cam.name : ''}`;
 }
@@ -8974,6 +9080,9 @@ function newScene() {
     layerVisible = { Untagged: true };
     renderLayersPanel();
     populateLayerSelect();
+    buildingLevels = [{ name: 'Ground Floor', height: 3.0 }];
+    _levelIsolateOn = false;
+    setActiveLevel(0);
     sunLight = null; // see ensureSunLight() — buildDefaultBlenderScene() just removed every previous scene object including any Sun
     presentSlides = [];
     presentIndex = 0;
@@ -9056,8 +9165,10 @@ function sceneToJSON() {
         // serialize a stale/identity matrix instead of the live position.
         objects: sceneObjects.map(o => {
             o.mesh.updateMatrix();
-            return { appType: o.type, appName: o.name, object: o.mesh.toJSON() };
+            return { appType: o.type, appName: o.name, appLevel: o.level, object: o.mesh.toJSON() };
         }),
+        buildingLevels,
+        activeLevelIndex,
         keyframes: Object.fromEntries(
             Object.entries(keyframes).map(([uuid, kfs]) => [uuid, kfs.map(k => ({
                 frame: k.frame,
@@ -9099,7 +9210,7 @@ function loadSceneFromJSON(data) {
         obj.name = entry.appName || obj.name;
         if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
         scene.add(obj);
-        sceneObjects.push({ name: obj.name, type: entry.appType || 'mesh', mesh: obj });
+        sceneObjects.push({ name: obj.name, type: entry.appType || 'mesh', mesh: obj, level: typeof entry.appLevel === 'number' ? entry.appLevel : 0 });
         if (entry.object && entry.object.object && entry.object.object.uuid) {
             uuidRemap[entry.object.object.uuid] = obj;
         }
@@ -9122,6 +9233,14 @@ function loadSceneFromJSON(data) {
     const disp  = document.getElementById('frame-display');
     if (scrub) scrub.value = animFrame;
     if (disp)  disp.innerText = animFrame;
+
+    // Older project files predate Levels entirely — fall back to a single
+    // Ground Floor rather than leaving buildingLevels in some stale state.
+    buildingLevels = Array.isArray(data.buildingLevels) && data.buildingLevels.length
+        ? data.buildingLevels
+        : [{ name: 'Ground Floor', height: 3.0 }];
+    _levelIsolateOn = false;
+    setActiveLevel(Math.min(data.activeLevelIndex || 0, buildingLevels.length - 1));
 
     undoStack.length = 0;
     redoStack.length = 0;
