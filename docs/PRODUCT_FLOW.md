@@ -196,14 +196,15 @@ Each wave ships a **file or a mode** the user can click. No wave is “research 
 
 | Already in the app | Add next |
 | --- | --- |
-| Draw, mesh, sculpt, BIM walls | Knife / loop cut / lasso / proportional edit |
+| Draw, mesh, sculpt, BIM walls, **grow/shrink/linked faces**, **object PE translate** | Knife polish / lasso / vertex PE (needs half-edge) |
 | GLB, OBJ, STL, ASCII DXF walls, `.3dcore.json` | IFC / USD / DWG only if a real WASM decoder exists |
 | PNG still + WebM + screenshot + **client ZIP pack** | Optional USDZ if an encoder is wired |
-| Lights, IBL, SSAO, P2P tiles | Path tracing (out of scope) |
+| Lights, IBL, SSAO, P2P tiles, **exposure + lighting presets (WebGL)** | Path tracing (out of scope) |
 | Present mode + quality ladder | Review-link hosting (not required locally) |
 | WebXR VR + trigger teleport; AR hit-test place or GLB | Hit-test reticle polish |
+| **stdlib server** serves `/js/*` `/css/*` + honest `GET /api/status` | GPU farm (will not exist) |
 
-Implementation status (2026-08-24): Waves **P1–P5**, honest **P6/P7**, plus **client ZIP pack**, **VR teleport**, and **AR plane hit-test place** ship in the browser client (`web/js/format_io.js`, `web/js/zip_store.js`, `web/js/render_adapter.js`). No FBX/SKP/USDZ buttons. `src/` demos stay isolated.
+Implementation status (2026-08-24): Waves **P1–P5**, honest **P6/P7**, plus **client ZIP pack**, **VR teleport**, **AR plane hit-test place**, **mesh selection grow/linked**, **object proportional translate**, **WebGL lighting/exposure knobs**, and **generic static + /api/status**. No FBX/SKP/USDZ buttons. `src/` demos stay isolated.
 
 ---
 
@@ -224,4 +225,4 @@ Implementation status (2026-08-24): Waves **P1–P5**, honest **P6/P7**, plus **
 
 World-class lightweight ante: **install ledhu, button nijam, output file open avuthundi.** Fake path tracer / 128 GPU / DWG magic **vaddu**.
 
-Implementation status (2026-08-24): Wave **P1 quality ladder** + **P2 Present** + **P3 stills/WebM** + **P4 OBJ/STL** + **P5 WebXR VR (teleport)** + **AR (hit-test place or GLB)** + **ASCII DXF walls** + **client ZIP pack** ship in the browser client. USDZ, DWG, SKP, IFC, and path tracing are still out of scope.
+Implementation status (2026-08-24): Wave **P1 quality ladder** + **P2 Present** + **P3 stills/WebM** + **P4 OBJ/STL** + **P5 WebXR VR (teleport)** + **AR (hit-test place or GLB)** + **ASCII DXF walls** + **client ZIP pack** + **grow/linked faces** + **object PE** + **WebGL lighting/exposure** + **`GET /api/status`**. USDZ, DWG, SKP, IFC, and path tracing are still out of scope.

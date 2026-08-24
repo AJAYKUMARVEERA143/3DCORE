@@ -30,6 +30,15 @@ const GRID_SNAP_STEPS = [0.01, 0.1, 0.25, 0.5, 1, 5];
 let gridSnapOn = true;
 let gridSnapStep = 1;
 let transformSpace = 'world'; // 'world' | 'local'
+// Object-mode proportional translate: nearby unselected objects follow the
+// gizmo with a distance falloff. Not Blender vertex PE (no half-edge mesh).
+const PROP_RADIUS_STEPS = [0.5, 1, 2, 4, 8];
+let proportionalEditOn = false;
+let proportionalRadius = 2;
+let lightingSunScale = 1;
+let lightingPresetName = 'studio';
+let engineExposure = 1;
+let engineEnvIntensity = 1;
 let groundGrid = null;
 let axisHelpers = [];
 let renderQualityName = 'balanced';
@@ -93,6 +102,24 @@ function toggleGridSnap(ev) {
     applyTransformSnapSettings();
     refreshSnapChip();
     setVCB('Grid Snap:', gridSnapOn ? formatSnapStep(gridSnapStep) : 'Off');
+}
+function refreshPropChip() {
+    const chip = document.getElementById('prop-chip');
+    if (!chip) return;
+    chip.textContent = proportionalEditOn ? `○ PE: ${proportionalRadius}m` : '○ PE: Off';
+    chip.classList.toggle('chip-off', !proportionalEditOn);
+    chip.title = 'Proportional object falloff on gizmo translate. Shift-click cycles radius. CAD: PE. Not vertex PE.';
+}
+function toggleProportionalEdit(ev) {
+    if (ev && ev.shiftKey) {
+        const i = PROP_RADIUS_STEPS.indexOf(proportionalRadius);
+        proportionalRadius = PROP_RADIUS_STEPS[(i + 1) % PROP_RADIUS_STEPS.length];
+        proportionalEditOn = true;
+    } else {
+        proportionalEditOn = !proportionalEditOn;
+    }
+    refreshPropChip();
+    setVCB('Proportional:', proportionalEditOn ? `On · ${proportionalRadius} m (objects, translate)` : 'Off');
 }
 function toggleTransformSpace() {
     transformSpace = transformSpace === 'world' ? 'local' : 'world';
@@ -221,12 +248,25 @@ function initApp() {
                     extras.push({ mesh: m, position: m.position.clone(), rotation: m.rotation.clone(), scale: m.scale.clone() });
                 }
             });
+            let prop = [];
+            if (proportionalEditOn && selectedObject && transformControls.getMode() === 'translate') {
+                const skip = new Set([selectedObject, ...extras.map(x => x.mesh)]);
+                const MT = window.MeshTools;
+                sceneObjects.forEach(entry => {
+                    const m = entry.mesh;
+                    if (!m || skip.has(m) || entry.locked || !m.position) return;
+                    const d = m.position.distanceTo(selectedObject.position);
+                    const w = MT ? MT.falloffWeight(d, proportionalRadius, 'smooth') : 0;
+                    if (w > 0) prop.push({ mesh: m, position: m.position.clone(), rotation: m.rotation.clone(), scale: m.scale.clone(), weight: w });
+                });
+            }
             _dragStartState = selectedObject ? {
                 obj: selectedObject,
                 position: selectedObject.position.clone(),
                 rotation: selectedObject.rotation.clone(),
                 scale: selectedObject.scale.clone(),
                 extras,
+                prop,
             } : null;
         } else if (_dragStartState) {
             // Drag ended — push undo command if anything actually changed
@@ -234,7 +274,10 @@ function initApp() {
             const obj = before.obj;
             const after = { position: obj.position.clone(), rotation: obj.rotation.clone(), scale: obj.scale.clone() };
             const extraAfter = (before.extras || []).map(x => ({ mesh: x.mesh, position: x.mesh.position.clone(), rotation: x.mesh.rotation.clone(), scale: x.mesh.scale.clone() }));
-            const extrasMoved = extraAfter.some((a, i) => !a.position.equals(before.extras[i].position));
+            const propAfter = (before.prop || []).map(x => ({ mesh: x.mesh, position: x.mesh.position.clone(), rotation: x.mesh.rotation.clone(), scale: x.mesh.scale.clone() }));
+            before.propEnd = propAfter;
+            const extrasMoved = extraAfter.some((a, i) => !a.position.equals(before.extras[i].position)) ||
+                propAfter.some((a, i) => !a.position.equals(before.prop[i].position));
             const changed = !before.position.equals(after.position) ||
                 !before.rotation.equals(after.rotation) ||
                 !before.scale.equals(after.scale) || extrasMoved;
@@ -243,11 +286,13 @@ function initApp() {
                     undo() {
                         obj.position.copy(before.position); obj.rotation.copy(before.rotation); obj.scale.copy(before.scale);
                         (before.extras || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        (before.prop || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
                         if (selectedObject === obj) updateInspectorFromSelected();
                     },
                     redo() {
                         obj.position.copy(after.position); obj.rotation.copy(after.rotation); obj.scale.copy(after.scale);
                         extraAfter.forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        (before.propEnd || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
                         if (selectedObject === obj) updateInspectorFromSelected();
                     },
                 });
@@ -263,9 +308,11 @@ function initApp() {
             snapVec3(selectedObject.position, gridSnapStep);
         }
         const extras = _dragStartState.extras || [];
-        if (extras.length) {
+        const prop = _dragStartState.prop || [];
+        if (extras.length || prop.length) {
             const delta = selectedObject.position.clone().sub(_dragStartState.position);
             extras.forEach(x => x.mesh.position.copy(x.position).add(delta));
+            prop.forEach(x => x.mesh.position.copy(x.position).add(delta.clone().multiplyScalar(x.weight)));
         }
     });
 
@@ -326,6 +373,8 @@ function initApp() {
     const qSel = document.getElementById('quality-select');
     if (qSel) qSel.value = renderQualityName;
     applyRenderQuality(renderQualityName);
+    refreshPropChip();
+    pingStudioService();
     refreshXRButtons();
     document.addEventListener('visibilitychange', markSceneDirty);
     if (renderer && renderer.domElement) {
@@ -3204,6 +3253,8 @@ function setupKeyboard() {
             if (k === '1') { setViewAngle('back');   return; }
             if (k === '3') { setViewAngle('left');   return; }
             if (k === '7') { setViewAngle('bottom'); return; }
+            if (k === '=' || k === '+' || e.key === 'Add') { e.preventDefault(); growFaceSelection(); return; }
+            if (k === '-' || e.key === 'Subtract') { e.preventDefault(); shrinkFaceSelection(); return; }
             return;
         }
 
@@ -3290,6 +3341,7 @@ function setupKeyboard() {
             // SketchUp CAD workspace is active, so they never shadow A/L/C
             // elsewhere (A = Select All, etc.).
             case 'l': case 'L':
+                if (currentInteractionMode === 'edit' && faceSelectOn) { selectLinkedFaces(); break; }
                 if (currentInteractionMode === 'sketchup') setActiveTool('line');
                 break;
             case 'c': case 'C':
@@ -3571,6 +3623,7 @@ function toggleHdriEnvironment(enabled) {
         skyTex.dispose();
     }
     scene.environment = _proceduralEnvTexture;
+    applyEnvIntensityToScene();
     setVCB('HDRI Environment:', 'On — procedural sky IBL');
 }
 
@@ -3727,7 +3780,7 @@ function setTimeOfDay(hours) {
     }
 
     sun.color = new THREE.Color(sunColor);
-    sun.intensity = intensity;
+    sun.intensity = intensity * lightingSunScale;
     if (currentStyle !== 'blueprint') scene.background = new THREE.Color(skyColor);
     setVCB('Time of Day:', `${formatTimeOfDay(timeOfDayHours)} — ${isDaytime ? 'Day' : 'Night'}`);
 }
@@ -4819,6 +4872,13 @@ const CAD_COMMANDS = {
 
     PRESENT: () => enterPresentMode(), PRES: () => enterPresentMode(),
     QUALITY: (arg) => applyRenderQuality((arg || 'balanced').toLowerCase()),
+    GROW: () => growFaceSelection(), SHRINK: () => shrinkFaceSelection(),
+    LINKED: () => selectLinkedFaces(), SELLINKED: () => selectLinkedFaces(),
+    PE: () => toggleProportionalEdit(), PROPORTIONAL: () => toggleProportionalEdit(),
+    LIGHTING: (arg) => applyLightingPreset((arg || 'studio').toLowerCase()),
+    EXPOSURE: (arg) => setEngineExposure(arg ? parseFloat(arg) : 1),
+    ENV: (arg) => setEngineEnvIntensity(arg ? parseFloat(arg) : 1),
+    STATUS: () => pingStudioService(),
     SLIDE: () => addPresentSlide(),
     SCREENSHOT: () => takeViewportScreenshot(), SHOT: () => takeViewportScreenshot(), SS: () => takeViewportScreenshot(),
 
@@ -6208,6 +6268,45 @@ function toggleFaceSelection(mesh, faceIndex, additive) {
     setVCB('Face Select:', `${selectedFaces.length} face(s) selected`);
 }
 
+function meshPositionsArray(mesh) {
+    ensureNonIndexed(mesh);
+    return mesh.geometry.attributes.position.array;
+}
+
+function growFaceSelection() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Grow:', 'Select a mesh'); return; }
+    if (!faceSelectOn) { setVCB('Grow:', 'Turn on Face select'); return; }
+    if (!selectedFaces.length) { setVCB('Grow:', 'Select a face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT) { setVCB('Grow:', 'mesh_tools.js failed to load'); return; }
+    const adj = MT.buildFaceAdjacency(meshPositionsArray(selectedObject));
+    selectedFaces = MT.growFaceSelection(selectedFaces, adj);
+    rebuildFaceHighlight();
+    setVCB('Grow:', `${selectedFaces.length} face(s)`);
+}
+
+function shrinkFaceSelection() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Shrink:', 'Select a mesh'); return; }
+    if (!selectedFaces.length) { setVCB('Shrink:', 'Select a face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT) return;
+    const adj = MT.buildFaceAdjacency(meshPositionsArray(selectedObject));
+    selectedFaces = MT.shrinkFaceSelection(selectedFaces, adj);
+    rebuildFaceHighlight();
+    setVCB('Shrink:', `${selectedFaces.length} face(s)`);
+}
+
+function selectLinkedFaces() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Select Linked:', 'Select a mesh'); return; }
+    if (!selectedFaces.length) { setVCB('Select Linked:', 'Select a seed face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT) return;
+    const adj = MT.buildFaceAdjacency(meshPositionsArray(selectedObject));
+    selectedFaces = MT.selectLinkedFaces(selectedFaces, adj);
+    rebuildFaceHighlight();
+    setVCB('Select Linked:', `${selectedFaces.length} face(s)`);
+}
+
 // ─────────────────────────────────────────────────────────────
 // VERTEX / EDGE SELECT — real picking + highlight (previously only Face
 // select did anything; Vertex/Edge pills were UI-only). Since faces get
@@ -7208,6 +7307,15 @@ function executeMeshEditTool(tool) {
             break;
         case 'extrude_to_cursor': // builtin.extrude_to_cursor — armed via setActiveTool; click a point to extrude to
             setVCB('Extrude to Cursor:', 'Select a face, then click a point in the viewport');
+            break;
+        case 'grow':
+            growFaceSelection();
+            break;
+        case 'shrink':
+            shrinkFaceSelection();
+            break;
+        case 'linked':
+            selectLinkedFaces();
             break;
     }
 
@@ -10579,7 +10687,9 @@ function showKeyboardShortcuts() {
             <b>Tab</b><span>Object ⇄ Edit Mode</span>
             <b>1 / 2 / 3</b><span>Vertex / Edge / Face select (Edit Mode)</span>
             <b>E</b><span>Eraser tool</span>
-            <b>L</b><span>Line tool (SketchUp CAD workspace)</span>
+            <b>L</b><span>Select Linked (Edit + Face) / Line (SketchUp CAD)</span>
+            <b>Ctrl+= / Ctrl+-</b><span>Grow / shrink face selection</span>
+            <b>PE chip</b><span>Proportional object translate falloff</span>
             <b>C</b><span>Circle tool (SketchUp CAD workspace)</span>
             <b>A</b><span>Arc tool (SketchUp CAD) — elsewhere: Select All / Deselect</span>
             <b>P / U</b><span>Push/Pull tool</span>
@@ -10703,9 +10813,13 @@ function applyRenderQuality(name) {
     if (!RQ) return;
     const preset = RQ.PRESETS[name] || RQ.PRESETS.balanced;
     renderQualityName = preset.id;
-    const dpr = RQ.clampPixelRatio(window.devicePixelRatio || 1, preset.pixelRatioCap);
+    const clampPR = RQ.clampPixelRatio || RQ.clampPixelRatio;
+    const cap = preset.pixelRatioCap != null ? preset.pixelRatioCap : preset.pixelRatioCap;
+    const dpr = clampPR(window.devicePixelRatio || 1, cap);
     renderer.setPixelRatio(dpr);
-    const smType = RQ.shadowMapConstant(THREE, preset.shadowType);
+    const smConst = RQ.shadowMapConstant || RQ.shadowMapConstant;
+    const smKind = preset.shadowType || preset.shadowType;
+    const smType = smConst(THREE, smKind);
     if (smType != null) renderer.shadowMap.type = smType;
     if (preset.shadows) {
         toggleShadows(userShadowPref, true);
@@ -10741,8 +10855,72 @@ function applyRenderQuality(name) {
     }
     const qSel = document.getElementById('quality-select');
     if (qSel) qSel.value = preset.id;
+    if (preset.exposure != null) setEngineExposure(preset.exposure, true);
+    if (preset.envIntensity != null) setEngineEnvIntensity(preset.envIntensity, true);
     markSceneDirty();
     setVCB('Quality:', preset.id.charAt(0).toUpperCase() + preset.id.slice(1));
+}
+
+function setEngineExposure(val, quiet) {
+    const RQ = window.RenderQuality;
+    engineExposure = RQ && RQ.clampExposure ? RQ.clampExposure(val) : Math.max(0.1, Math.min(3, Number(val) || 1));
+    if (renderer) renderer.toneMappingExposure = engineExposure;
+    const sl = document.getElementById('exposure-slider');
+    if (sl && sl.value !== String(engineExposure)) sl.value = engineExposure;
+    const lab = document.getElementById('exposure-value');
+    if (lab) lab.textContent = engineExposure.toFixed(2);
+    markSceneDirty();
+    if (!quiet) setVCB('Exposure:', engineExposure.toFixed(2));
+}
+
+function applyEnvIntensityToScene() {
+    if (!scene) return;
+    scene.traverse(obj => {
+        const mats = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
+        mats.forEach(m => {
+            if (m && m.envMapIntensity != null) m.envMapIntensity = engineEnvIntensity;
+        });
+    });
+}
+
+function setEngineEnvIntensity(val, quiet) {
+    const RQ = window.RenderQuality;
+    engineEnvIntensity = RQ && RQ.clampEnvIntensity ? RQ.clampEnvIntensity(val) : Math.max(0, Math.min(4, Number(val) || 1));
+    applyEnvIntensityToScene();
+    const sl = document.getElementById('env-intensity-slider');
+    if (sl && sl.value !== String(engineEnvIntensity)) sl.value = engineEnvIntensity;
+    const lab = document.getElementById('env-intensity-value');
+    if (lab) lab.textContent = engineEnvIntensity.toFixed(2);
+    markSceneDirty();
+    if (!quiet) setVCB('IBL:', engineEnvIntensity.toFixed(2));
+}
+
+function applyLightingPreset(id) {
+    const RQ = window.RenderQuality;
+    if (!RQ || !RQ.LIGHTING) return;
+    let key = id;
+    if (key === 'overcast' && !RQ.LIGHTING.overcast) key = 'overcast';
+    const L = RQ.LIGHTING[key] || RQ.LIGHTING.overcast || RQ.LIGHTING.studio;
+    lightingPresetName = L.id;
+    lightingSunScale = L.sunIntensityScale;
+    setTimeOfDay(L.hours);
+    setEngineExposure(L.exposure, true);
+    setEngineEnvIntensity(L.envIntensity, true);
+    if (L.ibl) {
+        toggleHdriEnvironment(true);
+        const hdri = document.getElementById('hdri-toggle');
+        if (hdri) hdri.checked = true;
+    }
+    const sel = document.getElementById('lighting-preset-select');
+    if (sel) sel.value = id;
+    markSceneDirty();
+    setVCB('Lighting:', (L.label || L.id) + ' (WebGL PBR)');
+}
+
+function pingStudioService() {
+    fetch('/api/status').then(r => r.json()).then(s => {
+        if (s && s.renderer_label) setVCB('Service:', s.renderer_label);
+    }).catch(() => {});
 }
 
 function withPresentationHelpersHidden(fn) {

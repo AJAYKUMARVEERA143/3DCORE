@@ -239,5 +239,107 @@ console.log('ok');
         self.assertIn("PACK", js)
 
 
+class ServiceRenderToolsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.StudioHTTPRequestHandler)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.port = cls.httpd.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def _get(self, path):
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_status_is_honest_webgl(self):
+        import json
+        code, body = self._get("/api/status")
+        self.assertEqual(code, 200)
+        payload = json.loads(body.decode())
+        self.assertEqual(payload.get("renderer"), "webgl-pbr")
+        self.assertFalse(payload.get("gpu_farm"))
+        self.assertIn("Not Cycles", payload.get("renderer_label", ""))
+
+    def test_js_modules_served_including_zip_and_mesh_tools(self):
+        for path in ("/js/zip_store.js", "/js/mesh_tools.js", "/js/render_adapter.js", "/css/style.css"):
+            code, body = self._get(path)
+            self.assertEqual(code, 200, path)
+            self.assertGreater(len(body), 20, path)
+
+    def test_static_rejects_path_escape(self):
+        code, _body = self._get("/js/../../server.py")
+        self.assertEqual(code, 404)
+
+    def test_mesh_tools_via_node(self):
+        import subprocess
+        script = r"""
+const MT = require('./web/js/mesh_tools.js');
+// Two-triangle quad (shared edge) + a detached triangle.
+const pos = new Float32Array([
+  0,0,0, 1,0,0, 1,1,0,
+  0,0,0, 1,1,0, 0,1,0,
+  5,0,0, 6,0,0, 5,1,0
+]);
+const adj = MT.buildFaceAdjacency(pos);
+if (adj.length !== 3) process.exit(2);
+if (adj[0].indexOf(1) < 0 || adj[1].indexOf(0) < 0) process.exit(3);
+if (adj[2].length !== 0) process.exit(4);
+const grown = MT.growFaceSelection([0], adj);
+if (grown.indexOf(1) < 0 || grown.indexOf(2) >= 0) process.exit(5);
+const linked = MT.selectLinkedFaces([0], adj);
+if (linked.length !== 2) process.exit(6);
+const shrunk = MT.shrinkFaceSelection([0,1], adj);
+if (shrunk.length !== 2) process.exit(7); // both interior to the island
+const w0 = MT.falloffWeight(0, 2, 'smooth');
+const w1 = MT.falloffWeight(2, 2, 'smooth');
+const w2 = MT.falloffWeight(1, 2, 'smooth');
+if (w0 !== 1) process.exit(8);
+if (w1 !== 0) process.exit(9);
+if (!(w2 > 0 && w2 < 1)) process.exit(10);
+console.log('ok');
+"""
+        proc = subprocess.run(["node", "-e", script], cwd=str(ROOT), capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ok", proc.stdout)
+
+    def test_lighting_presets_in_adapter(self):
+        import subprocess
+        script = r"""
+const RQ = require('./web/js/render_adapter.js');
+if (!RQ.LIGHTING.studio || !RQ.LIGHTING.dusk) process.exit(2);
+if (RQ.clampExposure(9) !== 3) process.exit(3);
+if (RQ.clampEnvIntensity(-1) !== 1) process.exit(4);
+if (RQ.PRESETS.present.exposure == null) process.exit(5);
+console.log('ok');
+"""
+        proc = subprocess.run(["node", "-e", script], cwd=str(ROOT), capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_hooks_in_app_and_html(self):
+        js = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function growFaceSelection", js)
+        self.assertIn("function applyLightingPreset", js)
+        self.assertIn("function setEngineExposure", js)
+        self.assertIn("function toggleProportionalEdit", js)
+        self.assertIn("js/mesh_tools.js", html)
+        self.assertIn('id="lighting-preset-select"', html)
+        self.assertIn('id="exposure-slider"', html)
+        self.assertIn('id="prop-chip"', html)
+        self.assertIn("GROW", js)
+        self.assertNotIn("Cycles Path Tracer", html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -170,6 +170,7 @@
   <div style="display:flex; align-items:center; gap:8px;">
     <button type="button" id="space-chip" class="hud-chip" onclick="toggleTransformSpace()" title="Click to toggle transform space (Global / Local)">🌐 Global</button>
     <button type="button" id="snap-chip" class="hud-chip" onclick="toggleGridSnap(event)" title="Click to toggle grid snap. Shift-click to cycle increment.">🧲 Snap: 1m</button>
+    <button type="button" id="prop-chip" class="hud-chip chip-off" onclick="toggleProportionalEdit(event)" title="Proportional object falloff while translating with the gizmo. Shift-click cycles radius. CAD: PE. Not vertex PE.">○ PE: Off</button>
   </div>
 
   <div class="v-toolbar-right">
@@ -554,6 +555,9 @@
               <button class="transport-btn" onclick="setActiveTool('poly_build')" title="Click points in the viewport to build a new face, double-click/Enter to finish">Poly Build</button>
               <button class="transport-btn" onclick="runDeleteSubElement()" title="Delete/Dissolve (X) the selected face/vertex/edge">Delete Selection</button>
               <button class="transport-btn" onclick="runMergeByDistance()" title="Merge by Distance (M) — welds nearby vertices">Merge by Distance</button>
+              <button class="transport-btn" onclick="growFaceSelection()" title="Grow face selection across shared edges (Ctrl+=)">Grow Faces</button>
+              <button class="transport-btn" onclick="shrinkFaceSelection()" title="Shrink face selection (Ctrl+-)">Shrink Faces</button>
+              <button class="transport-btn" onclick="selectLinkedFaces()" title="Select all faces connected by shared edges (L in Edit + Face select)">Select Linked</button>
             </div>
           </div>
 
@@ -769,7 +773,26 @@
                   <option value="present">Present</option>
                 </select>
               </div>
-              <div style="font-size:9.5px; color:var(--b-text-muted); margin-top:4px;">WebGL PBR. Draft caps pixel ratio and turns shadows off. Present raises shadow maps and optional SSAO.</div>
+              <div style="font-size:9.5px; color:var(--b-text-muted); margin-top:4px;">WebGL PBR. Draft caps pixel ratio and turns shadows off. Present raises shadow maps and optional SSAO. Not a path tracer.</div>
+              <div class="prop-numeric-row" style="margin-top:8px;">
+                <span class="prop-label">Lighting</span>
+                <select id="lighting-preset-select" style="flex:1; font-size:10px;" onchange="applyLightingPreset(this.value)" title="Moves the sun and IBL knobs. WebGL PBR, not a Cycles world.">
+                  <option value="studio" selected>Studio noon</option>
+                  <option value="overcast">Overcast</option>
+                  <option value="dusk">Dusk</option>
+                  <option value="night">Night</option>
+                </select>
+              </div>
+              <div class="prop-numeric-row" style="margin-top:6px;">
+                <span class="prop-label">Exposure</span>
+                <input type="range" id="exposure-slider" min="0.1" max="3" step="0.05" value="1" style="flex:1;" oninput="setEngineExposure(this.value)">
+                <span id="exposure-value" style="width:32px; font-size:10px; color:var(--b-text-muted);">1.00</span>
+              </div>
+              <div class="prop-numeric-row" style="margin-top:4px;">
+                <span class="prop-label">IBL</span>
+                <input type="range" id="env-intensity-slider" min="0" max="3" step="0.05" value="1" style="flex:1;" oninput="setEngineEnvIntensity(this.value)" title="MeshStandardMaterial.envMapIntensity">
+                <span id="env-intensity-value" style="width:32px; font-size:10px; color:var(--b-text-muted);">1.00</span>
+              </div>
               <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:#ccc; cursor:pointer;">
                 <input type="checkbox" id="shadow-toggle-checkbox" checked onchange="toggleShadows(this.checked)">
                 Shadows
@@ -1080,6 +1103,7 @@
 <script src="js/render_adapter.js"></script>
 <script src="js/format_io.js"></script>
 <script src="js/zip_store.js"></script>
+<script src="js/mesh_tools.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
