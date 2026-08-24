@@ -108,7 +108,7 @@ function refreshPropChip() {
     if (!chip) return;
     chip.textContent = proportionalEditOn ? `○ PE: ${proportionalRadius}m` : '○ PE: Off';
     chip.classList.toggle('chip-off', !proportionalEditOn);
-    chip.title = 'Proportional object falloff on gizmo translate. Shift-click cycles radius. CAD: PE. Not vertex PE.';
+    chip.title = 'Proportional falloff: objects on gizmo translate; vertices during Vertex Slide if PE is on. Shift-click cycles radius.';
 }
 function toggleProportionalEdit(ev) {
     if (ev && ev.shiftKey) {
@@ -376,6 +376,8 @@ function initApp() {
     refreshPropChip();
     pingStudioService();
     refreshXRButtons();
+    registerPwa();
+    refreshHudContext();
     document.addEventListener('visibilitychange', markSceneDirty);
     if (renderer && renderer.domElement) {
         renderer.domElement.addEventListener('pointerdown', markSceneDirty);
@@ -1709,6 +1711,7 @@ function createWallMeshesFromPoints(pts) {
         dir.normalize();
         if (i > 0) p0.addScaledVector(dir, -half);
         if (i < pts.length - 2) p1.addScaledVector(dir, half);
+        const ax = pts[i].x, ay = pts[i].y, bx = pts[i + 1].x, by = pts[i + 1].y;
         const seg = buildWallSegmentMesh(p0, p1, wallSettings.thickness, wallSettings.height);
         if (!seg) continue;
         seg.geometry.applyMatrix4(seg.matrix);
@@ -1718,6 +1721,13 @@ function createWallMeshesFromPoints(pts) {
         seg.material = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.9 });
         seg.castShadow = true; seg.receiveShadow = true;
         seg.name = nextBatchName('WallLayer', createdMeshes.map(m => m.name));
+        seg.userData.kind = 'wall';
+        seg.userData.wall = { x1: ax, y1: ay, x2: bx, y2: by, thickness: wallSettings.thickness, height: wallSettings.height };
+        const z0 = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].z : 0;
+        if (z0) {
+            seg.geometry.translate(0, 0, z0);
+            seg.geometry.computeVertexNormals();
+        }
         createdMeshes.push(seg);
     }
     return createdMeshes;
@@ -2211,7 +2221,14 @@ function setupAdvancedEditTools(canvas) {
 
         if (_slideStroke.mode === 'vertex') {
             const p = closestPointAmongNeighbors(localHit, _slideStroke.origin, _slideStroke.neighbors);
-            _slideStroke.group.forEach(idx => pos.setXYZ(idx, p.x, p.y, p.z));
+            if (proportionalEditOn && window.MeshTools && window.MeshTools.applyFalloffMove) {
+                const orig = _slideStroke.beforeGeo.attributes.position.array;
+                const dx = p.x - _slideStroke.origin.x, dy = p.y - _slideStroke.origin.y, dz = p.z - _slideStroke.origin.z;
+                const moved = MeshTools.applyFalloffMove(orig, _slideStroke.group[0], dx, dy, dz, proportionalRadius, 'smooth');
+                pos.array.set(moved);
+            } else {
+                _slideStroke.group.forEach(idx => pos.setXYZ(idx, p.x, p.y, p.z));
+            }
             selectedVertexGroup = _slideStroke.group;
             showVertexHighlight(_slideStroke.mesh, _slideStroke.group);
         } else {
@@ -4853,6 +4870,10 @@ const CAD_COMMANDS = {
     SELECTCIRCLE: () => setActiveTool('select_circle'), CIRCLESELECT: () => setActiveTool('select_circle'),
     LASSO: () => setActiveTool('select_lasso'), SELECTLASSO: () => setActiveTool('select_lasso'),
     KNIFE: () => setActiveTool('knife'),
+    LOOPSEL: () => selectFaceLoop(), FILLHOLE: () => fillSelectedHole(),
+    ROOM: () => makeRoomsFromWalls(), DOORCOMP: () => addDoorComponent(), WINCOMP: () => addWindowComponent(),
+    LEVEL: () => addStorey(), SCHEDULE: () => exportScheduleCsv(), DXFOUT: () => exportPlanDXF(),
+    ALIGNZ: () => alignSelectionToFloor(), CAMERA: () => addCameraObject(), LOOKCAM: () => lookThroughSelectedCamera(),
     MOVE: () => setActiveTool('move'), M: () => setActiveTool('move'),
     ROTATE: () => setActiveTool('rotate'), RO: () => setActiveTool('rotate'),
     SCALE: () => setActiveTool('scale'), SC: () => setActiveTool('scale'),
@@ -6367,6 +6388,244 @@ function selectLinkedFaces() {
     selectedFaces = MT.selectLinkedFaces(selectedFaces, adj);
     rebuildFaceHighlight();
     setVCB('Select Linked:', `${selectedFaces.length} face(s)`);
+}
+
+function selectFaceLoop() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Loop:', 'Select a mesh'); return; }
+    if (!selectedFaces.length) { setVCB('Loop:', 'Select a seed face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT || !MT.selectFaceLoop) { setVCB('Loop:', 'mesh_tools.js failed to load'); return; }
+    const pos = meshPositionsArray(selectedObject);
+    const adj = MT.buildFaceAdjacency(pos);
+    selectedFaces = MT.selectFaceLoop(selectedFaces[0], adj, pos);
+    rebuildFaceHighlight();
+    setVCB('Loop:', `${selectedFaces.length} face(s) — similar-normal walk, not a half-edge ring`);
+}
+
+function fillSelectedHole() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Fill:', 'Select a mesh'); return; }
+    const MT = window.MeshTools;
+    if (!MT || !MT.fillBoundaryFan) return;
+    ensureNonIndexed(selectedObject);
+    const pos = selectedObject.geometry.attributes.position;
+    const extra = MT.fillBoundaryFan(pos.array, selectedFaces.length ? selectedFaces : null);
+    if (!extra.length) { setVCB('Fill:', 'No open boundary to fan-fill'); return; }
+    const beforeGeo = deepCloneGeometry(selectedObject.geometry);
+    const merged = new Float32Array(pos.array.length + extra.length);
+    merged.set(pos.array, 0);
+    merged.set(extra, pos.array.length);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(merged, 3));
+    geo.computeVertexNormals();
+    selectedObject.geometry.dispose();
+    selectedObject.geometry = geo;
+    const afterGeo = deepCloneGeometry(geo);
+    pushUndo({
+        undo() { selectedObject.geometry.dispose(); selectedObject.geometry = beforeGeo; rebuildFaceHighlight(); },
+        redo() { selectedObject.geometry.dispose(); selectedObject.geometry = afterGeo; rebuildFaceHighlight(); },
+    });
+    setVCB('Fill:', `${extra.length / 9} triangle(s) from boundary fan — not a n-gon fill`);
+}
+
+let bimLevels = [{ name: 'Level 0', z: 0 }];
+let bimActiveLevel = 0;
+
+function collectWallSegments() {
+    const segs = [];
+    sceneObjects.forEach(o => {
+        const m = o.mesh;
+        if (!m || !m.userData || m.userData.kind !== 'wall' || !m.userData.wall) return;
+        const w = m.userData.wall;
+        segs.push({ x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2, mesh: m, name: m.name, length: Math.hypot(w.x2 - w.x1, w.y2 - w.y1), height: w.height });
+    });
+    return segs;
+}
+
+function makeRoomsFromWalls() {
+    const BK = window.BimKit;
+    if (!BK) { setVCB('Rooms:', 'bim_kit.js failed to load'); return; }
+    const segs = collectWallSegments();
+    if (segs.length < 3) { setVCB('Rooms:', 'Need 3+ wall segments with stored plan data (draw walls after this update)'); return; }
+    const loops = BK.loopsFromSegments(segs);
+    if (!loops.length) { setVCB('Rooms:', 'No closed wall loop found'); return; }
+    const z = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].z : 0;
+    const created = [];
+    loops.forEach((loop, i) => {
+        const area = BK.polygonArea(loop);
+        if (area < 0.2) return;
+        const c = BK.polygonCentroid(loop);
+        const shape = new THREE.Shape(loop.map(p => new THREE.Vector2(p.x, p.y)));
+        const geo = new THREE.ShapeGeometry(shape);
+        const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x8fbc8f, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+        mesh.position.z = z + 0.02;
+        mesh.name = nextName('Room');
+        mesh.userData.kind = 'room';
+        mesh.userData.room = { area: area, level: bimLevels[bimActiveLevel].name };
+        mesh.userData.skipRaycast = false;
+        created.push(mesh);
+        const spr = createDimensionSprite(`${area.toFixed(1)} m²`);
+        spr.position.set(c.x, c.y, z + 0.4);
+        mesh.add(spr);
+    });
+    if (!created.length) { setVCB('Rooms:', 'Loops were too small'); return; }
+    created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); });
+    renderOutliner();
+    pushUndo({
+        undo() { created.forEach(m => removeSceneObject(m)); },
+        redo() { created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); }); renderOutliner(); },
+    });
+    setVCB('Rooms:', `${created.length} room slab(s) from closed walls`);
+}
+
+function addOpeningComponent(kind) {
+    const BK = window.BimKit;
+    const spec = kind === 'window' ? (BK && BK.WINDOW) : (BK && BK.DOOR);
+    const w = spec ? spec.width : 0.9, h = spec ? spec.height : 2.1, sill = spec ? spec.sill : 0, d = spec ? spec.depth : 0.08;
+    const group = new THREE.Group();
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(w, d, h), new THREE.MeshStandardMaterial({ color: kind === 'window' ? 0x88ccee : 0x6b4f2a, roughness: 0.6 }));
+    group.add(frame);
+    group.position.set(0, 0, sill + h / 2);
+    if (selectedObject) {
+        const box = new THREE.Box3().setFromObject(selectedObject);
+        const c = box.getCenter(new THREE.Vector3());
+        group.position.set(c.x, c.y, sill + h / 2);
+    }
+    group.name = nextName(kind === 'window' ? 'Window' : 'Door');
+    group.userData.kind = kind;
+    group.userData.opening = { width: w, height: h, sill: sill };
+    scene.add(group);
+    sceneObjects.push({ name: group.name, type: 'group', mesh: group });
+    renderOutliner();
+    selectObject(group);
+    pushUndo({
+        undo() { removeSceneObject(group); },
+        redo() { scene.add(group); sceneObjects.push({ name: group.name, type: 'group', mesh: group }); renderOutliner(); selectObject(group); },
+    });
+    setVCB(kind === 'window' ? 'Window:' : 'Door:', `${w}×${h} m component (not a wall boolean — use Opening tool to cut)`);
+}
+
+function addDoorComponent() { addOpeningComponent('door'); }
+function addWindowComponent() { addOpeningComponent('window'); }
+
+function addStorey() {
+    const last = bimLevels[bimLevels.length - 1];
+    const z = (last ? last.z : 0) + 3;
+    const name = 'Level ' + bimLevels.length;
+    bimLevels.push({ name, z });
+    bimActiveLevel = bimLevels.length - 1;
+    refreshHudContext();
+    setVCB('Level:', `${name} at z=${z} m — new walls sit on this storey`);
+}
+
+function setActiveStorey(i) {
+    bimActiveLevel = Math.max(0, Math.min(bimLevels.length - 1, i | 0));
+    refreshHudContext();
+    setVCB('Level:', bimLevels[bimActiveLevel].name);
+}
+
+function isolateActiveStorey(on) {
+    const z = bimLevels[bimActiveLevel].z;
+    sceneObjects.forEach(o => {
+        if (!o.mesh) return;
+        const box = new THREE.Box3().setFromObject(o.mesh);
+        const mid = (box.min.z + box.max.z) * 0.5;
+        o.mesh.visible = !on || Math.abs(mid - (z + 1.35)) < 2.2 || (o.mesh.userData && o.mesh.userData.kind === 'room' && o.mesh.userData.room && o.mesh.userData.room.level === bimLevels[bimActiveLevel].name);
+    });
+    setVCB('Level:', on ? `Isolating ${bimLevels[bimActiveLevel].name}` : 'All storeys visible');
+}
+
+function exportScheduleCsv() {
+    const BK = window.BimKit;
+    if (!BK) return;
+    const rows = [];
+    collectWallSegments().forEach(s => rows.push({ kind: 'wall', name: s.name, qty: 1, length_m: s.length.toFixed(3), area_m2: (s.length * (s.height || 0)).toFixed(3), notes: '' }));
+    sceneObjects.forEach(o => {
+        const m = o.mesh;
+        if (!m || !m.userData) return;
+        if (m.userData.kind === 'room' && m.userData.room) {
+            rows.push({ kind: 'room', name: m.name, qty: 1, length_m: '', area_m2: m.userData.room.area.toFixed(3), notes: m.userData.room.level || '' });
+        }
+        if (m.userData.opening) {
+            rows.push({ kind: m.userData.kind || 'opening', name: m.name, qty: 1, length_m: m.userData.opening.width, area_m2: (m.userData.opening.width * m.userData.opening.height).toFixed(3), notes: 'component' });
+        }
+    });
+    const csv = BK.buildScheduleCsv(rows.length ? rows : [{ kind: 'empty', name: '', qty: 0, length_m: '', area_m2: '', notes: 'draw walls first' }]);
+    triggerDownload('data:text/csv;charset=utf-8,' + encodeURIComponent(csv), '3DCore_schedule.csv');
+    setVCB('Schedule:', `${rows.length} row(s)`);
+}
+
+function exportPlanDXF() {
+    const lines = collectWallSegments().map(s => ({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer: 'WALLS' }));
+    sceneObjects.forEach(o => {
+        if (!o.mesh || o.type !== 'guide') return;
+        const p = o.mesh.geometry && o.mesh.geometry.attributes && o.mesh.geometry.attributes.position;
+        if (!p || p.count < 2) return;
+        const a = new THREE.Vector3().fromBufferAttribute(p, 0).applyMatrix4(o.mesh.matrixWorld);
+        const b = new THREE.Vector3().fromBufferAttribute(p, p.count - 1).applyMatrix4(o.mesh.matrixWorld);
+        lines.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, layer: 'GUIDES' });
+    });
+    if (!lines.length) { setVCB('DXF:', 'No wall segments to export'); return; }
+    const text = (window.FormatIO && FormatIO.serializeDXF) ? FormatIO.serializeDXF(lines) : (window.BimKit && BimKit.serializeDXF(lines));
+    triggerDownload('data:application/dxf;charset=utf-8,' + encodeURIComponent(text), '3DCore_plan.dxf');
+    setVCB('DXF:', `${lines.length} LINE(s) — plan view only, not DWG`);
+}
+
+function alignSelectionToFloor() {
+    const targets = outlinerMultiSelect.size ? [...outlinerMultiSelect] : (selectedObject ? [selectedObject] : []);
+    if (!targets.length) { setVCB('Align:', 'Select an object'); return; }
+    targets.forEach(mesh => {
+        const box = new THREE.Box3().setFromObject(mesh);
+        mesh.position.z -= box.min.z;
+    });
+    setVCB('Align:', 'Min Z → 0 (floor)');
+}
+
+function addCameraObject() {
+    const helper = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.28, 12), new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0x335577, emissiveIntensity: 0.4 }));
+    helper.rotation.x = Math.PI / 2;
+    const group = new THREE.Group();
+    group.add(helper);
+    group.position.copy(camera.position);
+    group.quaternion.copy(camera.quaternion);
+    group.name = nextName('Camera');
+    group.userData.kind = 'camera';
+    group.userData.camera = { fov: camera.fov, target: orbitControls.target.toArray() };
+    scene.add(group);
+    sceneObjects.push({ name: group.name, type: 'camera', mesh: group });
+    renderOutliner();
+    selectObject(group);
+    pushUndo({
+        undo() { removeSceneObject(group); },
+        redo() { scene.add(group); sceneObjects.push({ name: group.name, type: 'camera', mesh: group }); renderOutliner(); selectObject(group); },
+    });
+    refreshHudContext();
+    setVCB('Camera:', 'Stored current view as a camera object');
+}
+
+function lookThroughSelectedCamera() {
+    const obj = selectedObject;
+    if (!obj || !obj.userData || obj.userData.kind !== 'camera') { setVCB('Camera:', 'Select a camera object'); return; }
+    camera.position.copy(obj.position);
+    camera.quaternion.copy(obj.quaternion);
+    if (obj.userData.camera && obj.userData.camera.target) {
+        orbitControls.target.fromArray(obj.userData.camera.target);
+    }
+    camera.updateProjectionMatrix();
+    markSceneDirty();
+    setVCB('Camera:', 'Looking through ' + obj.name);
+}
+
+function refreshHudContext() {
+    const el = document.getElementById('hud-context');
+    if (!el) return;
+    const lvl = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].name : 'Level 0';
+    const cam = sceneObjects.find(o => o.mesh && o.mesh.userData && o.mesh.userData.kind === 'camera');
+    el.textContent = `${lvl}${cam ? ' · ' + cam.name : ''}`;
+}
+
+function registerPwa() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -10143,6 +10402,22 @@ function executeAIAction(action) {
                 newScene();
                 return '✓ New scene';
 
+            case 'add_wall':
+                setActiveTool('wall');
+                return '✓ Wall tool — click points in the viewport';
+
+            case 'make_rooms':
+                makeRoomsFromWalls();
+                return '✓ Tried to make rooms from closed walls';
+
+            case 'add_door_component':
+                addDoorComponent();
+                return '✓ Door component added';
+
+            case 'export_schedule':
+                exportScheduleCsv();
+                return '✓ Schedule CSV download started';
+
             default:
                 return `✗ Unknown action: ${tool}`;
         }
@@ -10861,7 +11136,9 @@ function showKeyboardShortcuts() {
             <b>Ctrl+= / Ctrl+-</b><span>Grow / shrink face selection</span>
             <b>PE chip</b><span>Proportional object translate falloff</span>
             <b>Lasso / Box / Circle</b><span>Region select — objects, or faces in Edit+Face. Shift adds</span>
-            <b>Knife</b><span>Click a polyline on a selected face, Enter to cut</span>
+            <b>Loop / Fill</b><span>Face loop walk / boundary fan-fill (not half-edge)</span>
+            <b>ROOM / LEVEL / SCHEDULE / DXFOUT</b><span>BIM rooms, storeys, CSV, plan DXF</span>
+            <b>CAMERA / LOOKCAM</b><span>Store current view / look through camera object</span>
             <b>C</b><span>Circle tool (SketchUp CAD workspace)</span>
             <b>A</b><span>Arc tool (SketchUp CAD) — elsewhere: Select All / Deselect</span>
             <b>P / U</b><span>Push/Pull tool</span>

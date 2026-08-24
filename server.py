@@ -32,7 +32,7 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 # Browser client files under web/js and web/css. New modules (zip_store, mesh_tools)
 # must be served without adding a one-off elif per filename.
-_WEB_STATIC_PREFIXES = ("/js/", "/css/")
+_WEB_STATIC_PREFIXES = ("/js/", "/css/", "/manifest.json", "/sw.js")
 _WEB_MIME = {
     ".js": "application/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -250,6 +250,26 @@ AI_TOOLS = [
         "name": "set_time_of_day",
         "description": "Move the sun and change the sky/lighting to a given time of day (0-24 hours).",
         "input_schema": {"type": "object", "properties": {"hours": {"type": "number", "minimum": 0, "maximum": 24}}, "required": ["hours"]},
+    },
+    {
+        "name": "add_wall",
+        "description": "Switch to the wall drawing tool. The user still clicks points in the viewport.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "make_rooms",
+        "description": "Create room slabs from closed wall loops already in the scene.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_door_component",
+        "description": "Add a door mesh component (does not boolean-cut a wall).",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "export_schedule",
+        "description": "Download a CSV schedule of walls, rooms, and opening components.",
+        "input_schema": {"type": "object", "properties": {}},
     },
 ]
 

@@ -373,5 +373,66 @@ console.log('ok');
         self.assertIn("Knife polyline", html)
 
 
+class HonestCompleteTests(unittest.TestCase):
+    def test_bim_kit_area_and_dxf(self):
+        import subprocess
+        script = r"""
+const B = require('./web/js/bim_kit.js');
+const sq = [{x:0,y:0},{x:4,y:0},{x:4,y:3},{x:0,y:3}];
+if (Math.abs(B.polygonArea(sq) - 12) > 1e-9) process.exit(2);
+const segs = [
+  {x1:0,y1:0,x2:4,y2:0},{x1:4,y1:0,x2:4,y2:3},
+  {x1:4,y1:3,x2:0,y2:3},{x1:0,y1:3,x2:0,y2:0}
+];
+const loops = B.loopsFromSegments(segs);
+if (!loops.length) process.exit(3);
+const csv = B.buildScheduleCsv([{kind:'wall',name:'W',qty:1,length_m:'2',area_m2:'5',notes:''}]);
+if (csv.indexOf('wall') < 0) process.exit(4);
+const dxf = B.serializeDXF([{x1:0,y1:0,x2:1,y2:0,layer:'WALLS'}]);
+if (dxf.indexOf('LINE') < 0 || dxf.indexOf('EOF') < 0) process.exit(5);
+console.log('ok');
+"""
+        proc = subprocess.run(["node", "-e", script], cwd=str(ROOT), capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ok", proc.stdout)
+
+    def test_mesh_falloff_and_loop(self):
+        import subprocess
+        script = r"""
+const MT = require('./web/js/mesh_tools.js');
+const pos = new Float32Array([
+  0,0,0, 1,0,0, 1,1,0,
+  0,0,0, 1,1,0, 0,1,0,
+  1,0,0, 2,0,0, 2,1,0,
+  1,0,0, 2,1,0, 1,1,0
+]);
+const adj = MT.buildFaceAdjacency(pos);
+const loop = MT.selectFaceLoop(0, adj, pos);
+if (loop.indexOf(0) < 0) process.exit(2);
+const moved = MT.applyFalloffMove(pos, 0, 0, 0, 1, 10, 'smooth');
+if (moved[2] <= pos[2]) process.exit(3);
+const extra = MT.fillBoundaryFan(pos, [0,1]);
+if (!extra || extra.length % 9 !== 0) process.exit(4);
+console.log('ok');
+"""
+        proc = subprocess.run(["node", "-e", script], cwd=str(ROOT), capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_hooks_and_pwa(self):
+        js = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function makeRoomsFromWalls", js)
+        self.assertIn("function exportPlanDXF", js)
+        self.assertIn("function selectFaceLoop", js)
+        self.assertIn("function addCameraObject", js)
+        self.assertIn("js/bim_kit.js", html)
+        self.assertIn("manifest.json", html)
+        self.assertIn("exportPlanDXF()", html)
+        self.assertIn("LOOPSEL", js)
+        self.assertTrue((ROOT / "web" / "manifest.json").exists())
+        self.assertTrue((ROOT / "web" / "sw.js").exists())
+        self.assertIn("add_wall", (ROOT / "server.py").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

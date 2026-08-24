@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3D Core Studio — Blender 4.0 & SketchUp Professional Suite</title>
+<title>3D Core Studio</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#2f6fdc">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%235b9bd5'/%3E%3Cstop offset='100%25' stop-color='%232f6fdc'/%3E%3C/linearGradient%3E%3ClinearGradient id='gem' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%237ee8fa'/%3E%3Cstop offset='55%25' stop-color='%234a6fe8'/%3E%3Cstop offset='100%25' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='2' y='2' width='60' height='60' rx='16' fill='url(%23bg)'/%3E%3Ctext x='32' y='43' font-family='Arial,sans-serif' font-weight='900' font-size='28' fill='%23e8edf5' text-anchor='middle'%3E3D%3C/text%3E%3Cpolygon points='32,17 43,23.5 43,36.5 32,43 21,36.5 21,23.5' fill='url(%23gem)' stroke='%23fff' stroke-width='1' opacity='0.92'/%3E%3Cpolygon points='32,17 43,23.5 32,30 21,23.5' fill='%23a5f3fc' opacity='0.55'/%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
@@ -49,6 +51,8 @@
         <div class="top-menu-dropdown-item" onclick="triggerImportImage()">Import Image (Floorplan)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportOBJ()">Export OBJ <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportSTL()">Export STL <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exportPlanDXF()">Export Plan DXF (walls)…</div>
+        <div class="top-menu-dropdown-item" onclick="exportScheduleCsv()">Export BIM Schedule (CSV)…</div>
         <div class="top-menu-dropdown-item" onclick="exportClientPack()">Client Pack (ZIP)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="deleteAllGuides()">Delete All Guides <span class="kbd"></span></div>
@@ -109,9 +113,7 @@
 
   <div class="top-header-right">
     <div style="font-size:10.5px; color:var(--b-text-sub); display:flex; gap:6px;">
-      <span>Scene</span>
-      <span>|</span>
-      <span>ViewLayer</span>
+      <span id="hud-context">Level 0</span>
     </div>
   </div>
 </header>
@@ -562,6 +564,25 @@
               <button class="transport-btn" onclick="growFaceSelection()" title="Grow face selection across shared edges (Ctrl+=)">Grow Faces</button>
               <button class="transport-btn" onclick="shrinkFaceSelection()" title="Shrink face selection (Ctrl+-)">Shrink Faces</button>
               <button class="transport-btn" onclick="selectLinkedFaces()" title="Select all faces connected by shared edges (L in Edit + Face select)">Select Linked</button>
+              <button class="transport-btn" onclick="selectFaceLoop()" title="Walk similar-normal neighbors from the seed face">Select Face Loop</button>
+              <button class="transport-btn" onclick="fillSelectedHole()" title="Fan-fill an open boundary (not a n-gon fill)">Fill Hole</button>
+            </div>
+          </div>
+
+          <div class="b-accordion-box" id="bim-tools-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ BIM (honest — walls / rooms / components)</div>
+            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button class="transport-btn" onclick="makeRoomsFromWalls()" title="Closed wall loops become room slabs with area">Make Rooms</button>
+              <button class="transport-btn" onclick="addDoorComponent()" title="Door mesh component — Opening tool still cuts the hole">Add Door</button>
+              <button class="transport-btn" onclick="addWindowComponent()" title="Window mesh component">Add Window</button>
+              <button class="transport-btn" onclick="addStorey()" title="Add a 3 m storey; new walls sit on it">Add Level</button>
+              <button class="transport-btn" onclick="isolateActiveStorey(true)">Isolate Level</button>
+              <button class="transport-btn" onclick="isolateActiveStorey(false)">Show All Levels</button>
+              <button class="transport-btn" onclick="alignSelectionToFloor()">Align to Floor</button>
+              <button class="transport-btn" onclick="addCameraObject()">Add Camera</button>
+              <button class="transport-btn" onclick="lookThroughSelectedCamera()">Look Through Camera</button>
+              <button class="transport-btn" onclick="exportScheduleCsv()">Schedule CSV</button>
+              <button class="transport-btn" onclick="exportPlanDXF()">Plan DXF</button>
             </div>
           </div>
 
@@ -1108,6 +1129,7 @@
 <script src="js/format_io.js"></script>
 <script src="js/zip_store.js"></script>
 <script src="js/mesh_tools.js"></script>
+<script src="js/bim_kit.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
