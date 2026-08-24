@@ -30,6 +30,15 @@ const GRID_SNAP_STEPS = [0.01, 0.1, 0.25, 0.5, 1, 5];
 let gridSnapOn = true;
 let gridSnapStep = 1;
 let transformSpace = 'world'; // 'world' | 'local'
+// Object-mode proportional translate: nearby unselected objects follow the
+// gizmo with a distance falloff. Not Blender vertex PE (no half-edge mesh).
+const PROP_RADIUS_STEPS = [0.5, 1, 2, 4, 8];
+let proportionalEditOn = false;
+let proportionalRadius = 2;
+let lightingSunScale = 1;
+let lightingPresetName = 'studio';
+let engineExposure = 1;
+let engineEnvIntensity = 1;
 let groundGrid = null;
 let axisHelpers = [];
 let renderQualityName = 'balanced';
@@ -93,6 +102,24 @@ function toggleGridSnap(ev) {
     applyTransformSnapSettings();
     refreshSnapChip();
     setVCB('Grid Snap:', gridSnapOn ? formatSnapStep(gridSnapStep) : 'Off');
+}
+function refreshPropChip() {
+    const chip = document.getElementById('prop-chip');
+    if (!chip) return;
+    chip.textContent = proportionalEditOn ? `○ PE: ${proportionalRadius}m` : '○ PE: Off';
+    chip.classList.toggle('chip-off', !proportionalEditOn);
+    chip.title = 'Proportional falloff: objects on gizmo translate; vertices during Vertex Slide if PE is on. Shift-click cycles radius.';
+}
+function toggleProportionalEdit(ev) {
+    if (ev && ev.shiftKey) {
+        const i = PROP_RADIUS_STEPS.indexOf(proportionalRadius);
+        proportionalRadius = PROP_RADIUS_STEPS[(i + 1) % PROP_RADIUS_STEPS.length];
+        proportionalEditOn = true;
+    } else {
+        proportionalEditOn = !proportionalEditOn;
+    }
+    refreshPropChip();
+    setVCB('Proportional:', proportionalEditOn ? `On · ${proportionalRadius} m (objects, translate)` : 'Off');
 }
 function toggleTransformSpace() {
     transformSpace = transformSpace === 'world' ? 'local' : 'world';
@@ -221,12 +248,25 @@ function initApp() {
                     extras.push({ mesh: m, position: m.position.clone(), rotation: m.rotation.clone(), scale: m.scale.clone() });
                 }
             });
+            let prop = [];
+            if (proportionalEditOn && selectedObject && transformControls.getMode() === 'translate') {
+                const skip = new Set([selectedObject, ...extras.map(x => x.mesh)]);
+                const MT = window.MeshTools;
+                sceneObjects.forEach(entry => {
+                    const m = entry.mesh;
+                    if (!m || skip.has(m) || entry.locked || !m.position) return;
+                    const d = m.position.distanceTo(selectedObject.position);
+                    const w = MT ? MT.falloffWeight(d, proportionalRadius, 'smooth') : 0;
+                    if (w > 0) prop.push({ mesh: m, position: m.position.clone(), rotation: m.rotation.clone(), scale: m.scale.clone(), weight: w });
+                });
+            }
             _dragStartState = selectedObject ? {
                 obj: selectedObject,
                 position: selectedObject.position.clone(),
                 rotation: selectedObject.rotation.clone(),
                 scale: selectedObject.scale.clone(),
                 extras,
+                prop,
             } : null;
         } else if (_dragStartState) {
             // Drag ended — push undo command if anything actually changed
@@ -234,7 +274,10 @@ function initApp() {
             const obj = before.obj;
             const after = { position: obj.position.clone(), rotation: obj.rotation.clone(), scale: obj.scale.clone() };
             const extraAfter = (before.extras || []).map(x => ({ mesh: x.mesh, position: x.mesh.position.clone(), rotation: x.mesh.rotation.clone(), scale: x.mesh.scale.clone() }));
-            const extrasMoved = extraAfter.some((a, i) => !a.position.equals(before.extras[i].position));
+            const propAfter = (before.prop || []).map(x => ({ mesh: x.mesh, position: x.mesh.position.clone(), rotation: x.mesh.rotation.clone(), scale: x.mesh.scale.clone() }));
+            before.propEnd = propAfter;
+            const extrasMoved = extraAfter.some((a, i) => !a.position.equals(before.extras[i].position)) ||
+                propAfter.some((a, i) => !a.position.equals(before.prop[i].position));
             const changed = !before.position.equals(after.position) ||
                 !before.rotation.equals(after.rotation) ||
                 !before.scale.equals(after.scale) || extrasMoved;
@@ -243,11 +286,13 @@ function initApp() {
                     undo() {
                         obj.position.copy(before.position); obj.rotation.copy(before.rotation); obj.scale.copy(before.scale);
                         (before.extras || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        (before.prop || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
                         if (selectedObject === obj) updateInspectorFromSelected();
                     },
                     redo() {
                         obj.position.copy(after.position); obj.rotation.copy(after.rotation); obj.scale.copy(after.scale);
                         extraAfter.forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
+                        (before.propEnd || []).forEach(x => { x.mesh.position.copy(x.position); x.mesh.rotation.copy(x.rotation); x.mesh.scale.copy(x.scale); });
                         if (selectedObject === obj) updateInspectorFromSelected();
                     },
                 });
@@ -263,9 +308,11 @@ function initApp() {
             snapVec3(selectedObject.position, gridSnapStep);
         }
         const extras = _dragStartState.extras || [];
-        if (extras.length) {
+        const prop = _dragStartState.prop || [];
+        if (extras.length || prop.length) {
             const delta = selectedObject.position.clone().sub(_dragStartState.position);
             extras.forEach(x => x.mesh.position.copy(x.position).add(delta));
+            prop.forEach(x => x.mesh.position.copy(x.position).add(delta.clone().multiplyScalar(x.weight)));
         }
     });
 
@@ -326,7 +373,11 @@ function initApp() {
     const qSel = document.getElementById('quality-select');
     if (qSel) qSel.value = renderQualityName;
     applyRenderQuality(renderQualityName);
+    refreshPropChip();
+    pingStudioService();
     refreshXRButtons();
+    registerPwa();
+    refreshHudContext();
     document.addEventListener('visibilitychange', markSceneDirty);
     if (renderer && renderer.domElement) {
         renderer.domElement.addEventListener('pointerdown', markSceneDirty);
@@ -350,6 +401,7 @@ function renderTick(fromXR) {
     _lastFrameTime = now;
 
     if (fromXR) {
+        pollARHitTest();
         syncSectionPlane();
         renderer.render(scene, camera);
         return;
@@ -1078,6 +1130,7 @@ function cancelSketchTool() {
     _inferenceInfo = null;
     _axisLockDir = null;
     sketchState = null;
+    if (suCtx && suCanvas) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
 }
 
 // Adds a freshly-drawn object to the scene with full undo/redo, mirroring
@@ -1658,6 +1711,7 @@ function createWallMeshesFromPoints(pts) {
         dir.normalize();
         if (i > 0) p0.addScaledVector(dir, -half);
         if (i < pts.length - 2) p1.addScaledVector(dir, half);
+        const ax = pts[i].x, ay = pts[i].y, bx = pts[i + 1].x, by = pts[i + 1].y;
         const seg = buildWallSegmentMesh(p0, p1, wallSettings.thickness, wallSettings.height);
         if (!seg) continue;
         seg.geometry.applyMatrix4(seg.matrix);
@@ -1667,6 +1721,13 @@ function createWallMeshesFromPoints(pts) {
         seg.material = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.9 });
         seg.castShadow = true; seg.receiveShadow = true;
         seg.name = nextBatchName('WallLayer', createdMeshes.map(m => m.name));
+        seg.userData.kind = 'wall';
+        seg.userData.wall = { x1: ax, y1: ay, x2: bx, y2: by, thickness: wallSettings.thickness, height: wallSettings.height };
+        const z0 = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].z : 0;
+        if (z0) {
+            seg.geometry.translate(0, 0, z0);
+            seg.geometry.computeVertexNormals();
+        }
         createdMeshes.push(seg);
     }
     return createdMeshes;
@@ -2160,7 +2221,14 @@ function setupAdvancedEditTools(canvas) {
 
         if (_slideStroke.mode === 'vertex') {
             const p = closestPointAmongNeighbors(localHit, _slideStroke.origin, _slideStroke.neighbors);
-            _slideStroke.group.forEach(idx => pos.setXYZ(idx, p.x, p.y, p.z));
+            if (proportionalEditOn && window.MeshTools && window.MeshTools.applyFalloffMove) {
+                const orig = _slideStroke.beforeGeo.attributes.position.array;
+                const dx = p.x - _slideStroke.origin.x, dy = p.y - _slideStroke.origin.y, dz = p.z - _slideStroke.origin.z;
+                const moved = MeshTools.applyFalloffMove(orig, _slideStroke.group[0], dx, dy, dz, proportionalRadius, 'smooth');
+                pos.array.set(moved);
+            } else {
+                _slideStroke.group.forEach(idx => pos.setXYZ(idx, p.x, p.y, p.z));
+            }
             selectedVertexGroup = _slideStroke.group;
             showVertexHighlight(_slideStroke.mesh, _slideStroke.group);
         } else {
@@ -2262,7 +2330,7 @@ function setupAdvancedEditTools(canvas) {
         }
     });
 
-    // Knife: 2 clicks on the selected face -> straight cut between them.
+    // Knife: click a polyline on the selected face; Enter (or double-click) cuts every segment.
     canvas.addEventListener('pointerup', e => {
         if (activeTool !== 'knife' || currentInteractionMode !== 'edit' || e.button !== 0) return;
         if (!selectedObject || !selectedObject.isMesh || selectedFaces.length === 0) return;
@@ -2274,29 +2342,20 @@ function setupAdvancedEditTools(canvas) {
         const hits = _raycaster.intersectObject(selectedObject, false);
         if (hits.length === 0) return;
 
+        const pt = hits[0].point.clone();
         if (!sketchState || sketchState.tool !== 'knife') {
-            sketchState = { tool: 'knife', points: [hits[0].point.clone()] };
-            setVCB('Knife:', 'Click second point on the same face');
+            sketchState = { tool: 'knife', points: [pt] };
+            drawKnifePreview();
+            setVCB('Knife:', 'Click more points on the face, Enter to cut, Esc to cancel');
             return;
         }
-        sketchState.points.push(hits[0].point.clone());
-        const [p1, p2] = sketchState.points;
-        sketchState = null;
-
-        const obj = selectedObject;
-        const beforeGeo = deepCloneGeometry(obj.geometry);
-        const beforeFaces = selectedFaces.slice();
-        if (knifeSelectedFace(obj, p1, p2)) {
-            const afterGeo = deepCloneGeometry(obj.geometry);
-            pushUndo({
-                undo() { obj.geometry.dispose(); obj.geometry = beforeGeo; selectedFaces = beforeFaces.slice(); rebuildFaceHighlight(); },
-                redo() { obj.geometry.dispose(); obj.geometry = afterGeo; rebuildFaceHighlight(); },
-            });
-            setVCB('Knife:', 'Cut applied');
-        } else {
-            beforeGeo.dispose();
-            setVCB('Knife:', 'Cut line missed the selected face');
+        sketchState.points.push(pt);
+        drawKnifePreview();
+        if (e.detail >= 2 && sketchState.points.length >= 2) {
+            finishKnife();
+            return;
         }
+        setVCB('Knife:', `${sketchState.points.length} points — Enter to cut, Esc to cancel`);
     });
 
     // Extrude to Cursor: one click on the viewport -> extrude the selected face to that point.
@@ -2331,20 +2390,77 @@ function setupAdvancedEditTools(canvas) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SELECT BOX / SELECT CIRCLE — builtin.select_box / builtin.select_circle.
-// This app's whole selection/inspector/material/delete/duplicate pipeline
-// is built around a single selectedObject, not a multi-object set, so
-// these are scoped to: drag a rectangle/circle region, select whichever
-// object's screen position is closest to the region's reference point
-// (rect center, or the circle's drag-start center) among those inside it
-// — a real, forgiving hit-region click rather than true multi-select.
+// SELECT BOX / CIRCLE / LASSO — object centroids in Object mode,
+// triangle centroids in Edit + Face select. Shift adds. Real region tests,
+// not a fake "closest only" click.
 // ─────────────────────────────────────────────────────────────
+function projectWorldToClient(world, rect) {
+    const v = world.clone().project(camera);
+    if (v.z > 1) return null;
+    return {
+        x: rect.left + (v.x * 0.5 + 0.5) * rect.width,
+        y: rect.top + (-v.y * 0.5 + 0.5) * rect.height
+    };
+}
+
+function collectFacesInRegion(mesh, testFn, rect) {
+    ensureNonIndexed(mesh);
+    const pos = mesh.geometry.attributes.position;
+    const triCount = Math.floor(pos.count / 3);
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), mid = new THREE.Vector3();
+    const hits = [];
+    for (let f = 0; f < triCount; f++) {
+        a.fromBufferAttribute(pos, f * 3);
+        b.fromBufferAttribute(pos, f * 3 + 1);
+        c.fromBufferAttribute(pos, f * 3 + 2);
+        mid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+        mesh.localToWorld(mid);
+        const scr = projectWorldToClient(mid, rect);
+        if (scr && testFn(scr.x, scr.y)) hits.push(f);
+    }
+    return hits;
+}
+
+function applyRegionObjectSelect(testFn, refPoint, rect, additive) {
+    const worldPos = new THREE.Vector3();
+    const hits = [];
+    sceneObjects.forEach(o => {
+        if (!o.mesh || o.mesh.name === '_cursor' || o.mesh.name === '_ar_reticle') return;
+        o.mesh.getWorldPosition(worldPos);
+        const scr = projectWorldToClient(worldPos, rect);
+        if (!scr || !testFn(scr.x, scr.y)) return;
+        const d = refPoint ? Math.hypot(scr.x - refPoint.x, scr.y - refPoint.y) : 0;
+        hits.push({ mesh: o.mesh, d });
+    });
+    hits.sort((a, b) => a.d - b.d);
+    if (!additive) outlinerMultiSelect.clear();
+    hits.forEach(h => outlinerMultiSelect.add(h.mesh));
+    const best = hits.length ? hits[0].mesh : null;
+    if (best) selectObject(best);
+    else if (!additive) selectObject(null);
+    return hits.length;
+}
+
+function applyRegionFaceSelect(testFn, rect, additive) {
+    if (!selectedObject || !selectedObject.isMesh) return 0;
+    const faces = collectFacesInRegion(selectedObject, testFn, rect);
+    if (!additive) selectedFaces = [];
+    faces.forEach(f => { if (!selectedFaces.includes(f)) selectedFaces.push(f); });
+    rebuildFaceHighlight();
+    return faces.length;
+}
+
 function setupBoxCircleSelect(canvas) {
     let start = null;
+    let lassoPts = null;
+
+    const isRegionTool = () => activeTool === 'select_box' || activeTool === 'select_circle' || activeTool === 'select_lasso';
 
     canvas.addEventListener('pointerdown', e => {
-        if ((activeTool !== 'select_box' && activeTool !== 'select_circle') || e.button !== 0) return;
+        if (!isRegionTool() || e.button !== 0) return;
+        if (orbitControls) orbitControls.enabled = false;
         start = { x: e.clientX, y: e.clientY };
+        lassoPts = activeTool === 'select_lasso' ? [{ x: e.clientX, y: e.clientY }] : null;
     });
 
     canvas.addEventListener('pointermove', e => {
@@ -2357,7 +2473,20 @@ function setupBoxCircleSelect(canvas) {
         suCtx.setLineDash([4, 3]);
         const sx0 = start.x - rect.left, sy0 = start.y - rect.top;
         const sx1 = e.clientX - rect.left, sy1 = e.clientY - rect.top;
-        if (activeTool === 'select_box') {
+        if (activeTool === 'select_lasso') {
+            const last = lassoPts[lassoPts.length - 1];
+            if (!last || Math.hypot(e.clientX - last.x, e.clientY - last.y) > 4) {
+                lassoPts.push({ x: e.clientX, y: e.clientY });
+            }
+            suCtx.beginPath();
+            lassoPts.forEach((p, i) => {
+                const x = p.x - rect.left, y = p.y - rect.top;
+                if (i === 0) suCtx.moveTo(x, y); else suCtx.lineTo(x, y);
+            });
+            suCtx.closePath();
+            suCtx.fill();
+            suCtx.stroke();
+        } else if (activeTool === 'select_box') {
             const x = Math.min(sx0, sx1), y = Math.min(sy0, sy1), w = Math.abs(sx1 - sx0), h = Math.abs(sy1 - sy0);
             suCtx.fillRect(x, y, w, h);
             suCtx.strokeRect(x, y, w, h);
@@ -2369,44 +2498,39 @@ function setupBoxCircleSelect(canvas) {
     });
 
     canvas.addEventListener('pointerup', e => {
-        if ((activeTool !== 'select_box' && activeTool !== 'select_circle') || e.button !== 0 || !start) return;
+        if (!isRegionTool() || e.button !== 0 || !start) return;
+        if (orbitControls) orbitControls.enabled = true;
         const end = { x: e.clientX, y: e.clientY };
         const dragDist = Math.hypot(end.x - start.x, end.y - start.y);
         const rect = canvas.getBoundingClientRect();
+        const MT = window.MeshTools;
 
-        let test, refPoint;
-        if (activeTool === 'select_box' && dragDist >= 5) {
+        let test, refPoint, label = 'Select:';
+        if (activeTool === 'select_lasso') {
+            label = 'Select Lasso:';
+            const pts = (lassoPts && lassoPts.length >= 3) ? lassoPts : [start, end, start];
+            test = (sx, sy) => MT && MT.pointInPolygon ? MT.pointInPolygon(sx, sy, pts) : false;
+            refPoint = start;
+        } else if (activeTool === 'select_box' && dragDist >= 5) {
+            label = 'Select Box:';
             const minX = Math.min(start.x, end.x), maxX = Math.max(start.x, end.x);
             const minY = Math.min(start.y, end.y), maxY = Math.max(start.y, end.y);
             test = (sx, sy) => sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;
             refPoint = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
         } else {
+            label = 'Select Circle:';
             const radius = dragDist >= 5 ? dragDist : 18;
             test = (sx, sy) => Math.hypot(sx - start.x, sy - start.y) <= radius;
             refPoint = start;
         }
 
-        const worldPos = new THREE.Vector3();
-        const hits = [];
-        sceneObjects.forEach(o => {
-            if (!o.mesh || o.mesh.name === '_cursor') return;
-            o.mesh.getWorldPosition(worldPos);
-            const proj = worldPos.clone().project(camera);
-            if (proj.z > 1) return; // behind the camera
-            const sx = rect.left + (proj.x * 0.5 + 0.5) * rect.width;
-            const sy = rect.top + (-proj.y * 0.5 + 0.5) * rect.height;
-            if (!test(sx, sy)) return;
-            const d = Math.hypot(sx - refPoint.x, sy - refPoint.y);
-            hits.push({ mesh: o.mesh, d });
-        });
-        hits.sort((a, b) => a.d - b.d);
-        if (!e.shiftKey) outlinerMultiSelect.clear();
-        hits.forEach(h => outlinerMultiSelect.add(h.mesh));
-        const best = hits.length ? hits[0].mesh : null;
-        if (best) selectObject(best);
-        else if (!e.shiftKey) selectObject(null);
-        setVCB(activeTool === 'select_box' ? 'Select Box:' : 'Select Circle:', hits.length ? `${hits.length} object(s)` : 'Nothing in region');
+        const faceMode = currentInteractionMode === 'edit' && faceSelectOn && selectedObject && selectedObject.isMesh;
+        let n = 0;
+        if (faceMode) n = applyRegionFaceSelect(test, rect, e.shiftKey);
+        else n = applyRegionObjectSelect(test, refPoint, rect, e.shiftKey);
+        setVCB(label, n ? `${n} ${faceMode ? 'face' : 'object'}(s)` : 'Nothing in region');
         start = null;
+        lassoPts = null;
         if (suCtx) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
     });
 }
@@ -3039,7 +3163,7 @@ const OFFSET_CURSOR_GLYPH =
     "<rect x='3' y='3' width='18' height='18'/><rect x='8' y='8' width='8' height='8'/></g>";
 const TOOL_CURSORS = {
     select: 'default', move: 'move', rotate: 'alias', scale: 'nwse-resize',
-    eraser: 'not-allowed', select_box: 'crosshair', select_circle: 'crosshair',
+    eraser: 'not-allowed', select_box: 'crosshair', select_circle: 'crosshair', select_lasso: 'crosshair',
     line: 'crosshair', rect: 'crosshair', circle: 'crosshair', arc: 'crosshair',
     polygon: 'crosshair', pie: 'crosshair', rotrect: 'crosshair',
     walk: 'move', lookaround: 'grab', position_camera: 'crosshair',
@@ -3203,6 +3327,8 @@ function setupKeyboard() {
             if (k === '1') { setViewAngle('back');   return; }
             if (k === '3') { setViewAngle('left');   return; }
             if (k === '7') { setViewAngle('bottom'); return; }
+            if (k === '=' || k === '+' || e.key === 'Add') { e.preventDefault(); growFaceSelection(); return; }
+            if (k === '-' || e.key === 'Subtract') { e.preventDefault(); shrinkFaceSelection(); return; }
             return;
         }
 
@@ -3261,6 +3387,7 @@ function setupKeyboard() {
                 else if (sketchState?.tool === 'polybuild') finishPolyBuild();
                 else if (sketchState?.tool === 'wall') finishWall();
                 else if (sketchState?.tool === 'slab') finishSlab();
+                else if (sketchState?.tool === 'knife') finishKnife();
                 break;
             }
             case 'Escape':
@@ -3289,6 +3416,7 @@ function setupKeyboard() {
             // SketchUp CAD workspace is active, so they never shadow A/L/C
             // elsewhere (A = Select All, etc.).
             case 'l': case 'L':
+                if (currentInteractionMode === 'edit' && faceSelectOn) { selectLinkedFaces(); break; }
                 if (currentInteractionMode === 'sketchup') setActiveTool('line');
                 break;
             case 'c': case 'C':
@@ -3570,6 +3698,7 @@ function toggleHdriEnvironment(enabled) {
         skyTex.dispose();
     }
     scene.environment = _proceduralEnvTexture;
+    applyEnvIntensityToScene();
     setVCB('HDRI Environment:', 'On — procedural sky IBL');
 }
 
@@ -3726,7 +3855,7 @@ function setTimeOfDay(hours) {
     }
 
     sun.color = new THREE.Color(sunColor);
-    sun.intensity = intensity;
+    sun.intensity = intensity * lightingSunScale;
     if (currentStyle !== 'blueprint') scene.background = new THREE.Color(skyColor);
     setVCB('Time of Day:', `${formatTimeOfDay(timeOfDayHours)} — ${isDaytime ? 'Day' : 'Night'}`);
 }
@@ -4737,6 +4866,14 @@ const CAD_COMMANDS = {
     ERASER: () => setActiveTool('eraser'),
 
     SELECT: () => setActiveTool('select'),
+    SELECTBOX: () => setActiveTool('select_box'), BOXSELECT: () => setActiveTool('select_box'),
+    SELECTCIRCLE: () => setActiveTool('select_circle'), CIRCLESELECT: () => setActiveTool('select_circle'),
+    LASSO: () => setActiveTool('select_lasso'), SELECTLASSO: () => setActiveTool('select_lasso'),
+    KNIFE: () => setActiveTool('knife'),
+    LOOPSEL: () => selectFaceLoop(), FILLHOLE: () => fillSelectedHole(),
+    ROOM: () => makeRoomsFromWalls(), DOORCOMP: () => addDoorComponent(), WINCOMP: () => addWindowComponent(),
+    LEVEL: () => addStorey(), SCHEDULE: () => exportScheduleCsv(), DXFOUT: () => exportPlanDXF(),
+    ALIGNZ: () => alignSelectionToFloor(), CAMERA: () => addCameraObject(), LOOKCAM: () => lookThroughSelectedCamera(),
     MOVE: () => setActiveTool('move'), M: () => setActiveTool('move'),
     ROTATE: () => setActiveTool('rotate'), RO: () => setActiveTool('rotate'),
     SCALE: () => setActiveTool('scale'), SC: () => setActiveTool('scale'),
@@ -4813,10 +4950,18 @@ const CAD_COMMANDS = {
     IMPORTDXF: () => triggerImportDXF(), DXF: () => triggerImportDXF(),
     VR: () => enterVR(), ENTERVR: () => enterVR(),
     AR: () => enterAR(), ENTERAR: () => enterAR(),
+    PACK: () => exportClientPack(), CLIENTPACK: () => exportClientPack(), ZIP: () => exportClientPack(),
     ASSETS: () => openAssetLibrary(), LIBRARY: () => openAssetLibrary(),
 
     PRESENT: () => enterPresentMode(), PRES: () => enterPresentMode(),
     QUALITY: (arg) => applyRenderQuality((arg || 'balanced').toLowerCase()),
+    GROW: () => growFaceSelection(), SHRINK: () => shrinkFaceSelection(),
+    LINKED: () => selectLinkedFaces(), SELLINKED: () => selectLinkedFaces(),
+    PE: () => toggleProportionalEdit(), PROPORTIONAL: () => toggleProportionalEdit(),
+    LIGHTING: (arg) => applyLightingPreset((arg || 'studio').toLowerCase()),
+    EXPOSURE: (arg) => setEngineExposure(arg ? parseFloat(arg) : 1),
+    ENV: (arg) => setEngineEnvIntensity(arg ? parseFloat(arg) : 1),
+    STATUS: () => pingStudioService(),
     SLIDE: () => addPresentSlide(),
     SCREENSHOT: () => takeViewportScreenshot(), SHOT: () => takeViewportScreenshot(), SS: () => takeViewportScreenshot(),
 
@@ -6206,6 +6351,283 @@ function toggleFaceSelection(mesh, faceIndex, additive) {
     setVCB('Face Select:', `${selectedFaces.length} face(s) selected`);
 }
 
+function meshPositionsArray(mesh) {
+    ensureNonIndexed(mesh);
+    return mesh.geometry.attributes.position.array;
+}
+
+function growFaceSelection() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Grow:', 'Select a mesh'); return; }
+    if (!faceSelectOn) { setVCB('Grow:', 'Turn on Face select'); return; }
+    if (!selectedFaces.length) { setVCB('Grow:', 'Select a face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT) { setVCB('Grow:', 'mesh_tools.js failed to load'); return; }
+    const adj = MT.buildFaceAdjacency(meshPositionsArray(selectedObject));
+    selectedFaces = MT.growFaceSelection(selectedFaces, adj);
+    rebuildFaceHighlight();
+    setVCB('Grow:', `${selectedFaces.length} face(s)`);
+}
+
+function shrinkFaceSelection() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Shrink:', 'Select a mesh'); return; }
+    if (!selectedFaces.length) { setVCB('Shrink:', 'Select a face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT) return;
+    const adj = MT.buildFaceAdjacency(meshPositionsArray(selectedObject));
+    selectedFaces = MT.shrinkFaceSelection(selectedFaces, adj);
+    rebuildFaceHighlight();
+    setVCB('Shrink:', `${selectedFaces.length} face(s)`);
+}
+
+function selectLinkedFaces() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Select Linked:', 'Select a mesh'); return; }
+    if (!selectedFaces.length) { setVCB('Select Linked:', 'Select a seed face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT) return;
+    const adj = MT.buildFaceAdjacency(meshPositionsArray(selectedObject));
+    selectedFaces = MT.selectLinkedFaces(selectedFaces, adj);
+    rebuildFaceHighlight();
+    setVCB('Select Linked:', `${selectedFaces.length} face(s)`);
+}
+
+function selectFaceLoop() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Loop:', 'Select a mesh'); return; }
+    if (!selectedFaces.length) { setVCB('Loop:', 'Select a seed face first'); return; }
+    const MT = window.MeshTools;
+    if (!MT || !MT.selectFaceLoop) { setVCB('Loop:', 'mesh_tools.js failed to load'); return; }
+    const pos = meshPositionsArray(selectedObject);
+    const adj = MT.buildFaceAdjacency(pos);
+    selectedFaces = MT.selectFaceLoop(selectedFaces[0], adj, pos);
+    rebuildFaceHighlight();
+    setVCB('Loop:', `${selectedFaces.length} face(s) — similar-normal walk, not a half-edge ring`);
+}
+
+function fillSelectedHole() {
+    if (!selectedObject || !selectedObject.isMesh) { setVCB('Fill:', 'Select a mesh'); return; }
+    const MT = window.MeshTools;
+    if (!MT || !MT.fillBoundaryFan) return;
+    ensureNonIndexed(selectedObject);
+    const pos = selectedObject.geometry.attributes.position;
+    const extra = MT.fillBoundaryFan(pos.array, selectedFaces.length ? selectedFaces : null);
+    if (!extra.length) { setVCB('Fill:', 'No open boundary to fan-fill'); return; }
+    const beforeGeo = deepCloneGeometry(selectedObject.geometry);
+    const merged = new Float32Array(pos.array.length + extra.length);
+    merged.set(pos.array, 0);
+    merged.set(extra, pos.array.length);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(merged, 3));
+    geo.computeVertexNormals();
+    selectedObject.geometry.dispose();
+    selectedObject.geometry = geo;
+    const afterGeo = deepCloneGeometry(geo);
+    pushUndo({
+        undo() { selectedObject.geometry.dispose(); selectedObject.geometry = beforeGeo; rebuildFaceHighlight(); },
+        redo() { selectedObject.geometry.dispose(); selectedObject.geometry = afterGeo; rebuildFaceHighlight(); },
+    });
+    setVCB('Fill:', `${extra.length / 9} triangle(s) from boundary fan — not a n-gon fill`);
+}
+
+let bimLevels = [{ name: 'Level 0', z: 0 }];
+let bimActiveLevel = 0;
+
+function collectWallSegments() {
+    const segs = [];
+    sceneObjects.forEach(o => {
+        const m = o.mesh;
+        if (!m || !m.userData || m.userData.kind !== 'wall' || !m.userData.wall) return;
+        const w = m.userData.wall;
+        segs.push({ x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2, mesh: m, name: m.name, length: Math.hypot(w.x2 - w.x1, w.y2 - w.y1), height: w.height });
+    });
+    return segs;
+}
+
+function makeRoomsFromWalls() {
+    const BK = window.BimKit;
+    if (!BK) { setVCB('Rooms:', 'bim_kit.js failed to load'); return; }
+    const segs = collectWallSegments();
+    if (segs.length < 3) { setVCB('Rooms:', 'Need 3+ wall segments with stored plan data (draw walls after this update)'); return; }
+    const loops = BK.loopsFromSegments(segs);
+    if (!loops.length) { setVCB('Rooms:', 'No closed wall loop found'); return; }
+    const z = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].z : 0;
+    const created = [];
+    loops.forEach((loop, i) => {
+        const area = BK.polygonArea(loop);
+        if (area < 0.2) return;
+        const c = BK.polygonCentroid(loop);
+        const shape = new THREE.Shape(loop.map(p => new THREE.Vector2(p.x, p.y)));
+        const geo = new THREE.ShapeGeometry(shape);
+        const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x8fbc8f, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+        mesh.position.z = z + 0.02;
+        mesh.name = nextName('Room');
+        mesh.userData.kind = 'room';
+        mesh.userData.room = { area: area, level: bimLevels[bimActiveLevel].name };
+        mesh.userData.skipRaycast = false;
+        created.push(mesh);
+        const spr = createDimensionSprite(`${area.toFixed(1)} m²`);
+        spr.position.set(c.x, c.y, z + 0.4);
+        mesh.add(spr);
+    });
+    if (!created.length) { setVCB('Rooms:', 'Loops were too small'); return; }
+    created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); });
+    renderOutliner();
+    pushUndo({
+        undo() { created.forEach(m => removeSceneObject(m)); },
+        redo() { created.forEach(m => { scene.add(m); sceneObjects.push({ name: m.name, type: 'mesh', mesh: m }); }); renderOutliner(); },
+    });
+    setVCB('Rooms:', `${created.length} room slab(s) from closed walls`);
+}
+
+function addOpeningComponent(kind) {
+    const BK = window.BimKit;
+    const spec = kind === 'window' ? (BK && BK.WINDOW) : (BK && BK.DOOR);
+    const w = spec ? spec.width : 0.9, h = spec ? spec.height : 2.1, sill = spec ? spec.sill : 0, d = spec ? spec.depth : 0.08;
+    const group = new THREE.Group();
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(w, d, h), new THREE.MeshStandardMaterial({ color: kind === 'window' ? 0x88ccee : 0x6b4f2a, roughness: 0.6 }));
+    group.add(frame);
+    group.position.set(0, 0, sill + h / 2);
+    if (selectedObject) {
+        const box = new THREE.Box3().setFromObject(selectedObject);
+        const c = box.getCenter(new THREE.Vector3());
+        group.position.set(c.x, c.y, sill + h / 2);
+    }
+    group.name = nextName(kind === 'window' ? 'Window' : 'Door');
+    group.userData.kind = kind;
+    group.userData.opening = { width: w, height: h, sill: sill };
+    scene.add(group);
+    sceneObjects.push({ name: group.name, type: 'group', mesh: group });
+    renderOutliner();
+    selectObject(group);
+    pushUndo({
+        undo() { removeSceneObject(group); },
+        redo() { scene.add(group); sceneObjects.push({ name: group.name, type: 'group', mesh: group }); renderOutliner(); selectObject(group); },
+    });
+    setVCB(kind === 'window' ? 'Window:' : 'Door:', `${w}×${h} m component (not a wall boolean — use Opening tool to cut)`);
+}
+
+function addDoorComponent() { addOpeningComponent('door'); }
+function addWindowComponent() { addOpeningComponent('window'); }
+
+function addStorey() {
+    const last = bimLevels[bimLevels.length - 1];
+    const z = (last ? last.z : 0) + 3;
+    const name = 'Level ' + bimLevels.length;
+    bimLevels.push({ name, z });
+    bimActiveLevel = bimLevels.length - 1;
+    refreshHudContext();
+    setVCB('Level:', `${name} at z=${z} m — new walls sit on this storey`);
+}
+
+function setActiveStorey(i) {
+    bimActiveLevel = Math.max(0, Math.min(bimLevels.length - 1, i | 0));
+    refreshHudContext();
+    setVCB('Level:', bimLevels[bimActiveLevel].name);
+}
+
+function isolateActiveStorey(on) {
+    const z = bimLevels[bimActiveLevel].z;
+    sceneObjects.forEach(o => {
+        if (!o.mesh) return;
+        const box = new THREE.Box3().setFromObject(o.mesh);
+        const mid = (box.min.z + box.max.z) * 0.5;
+        o.mesh.visible = !on || Math.abs(mid - (z + 1.35)) < 2.2 || (o.mesh.userData && o.mesh.userData.kind === 'room' && o.mesh.userData.room && o.mesh.userData.room.level === bimLevels[bimActiveLevel].name);
+    });
+    setVCB('Level:', on ? `Isolating ${bimLevels[bimActiveLevel].name}` : 'All storeys visible');
+}
+
+function exportScheduleCsv() {
+    const BK = window.BimKit;
+    if (!BK) return;
+    const rows = [];
+    collectWallSegments().forEach(s => rows.push({ kind: 'wall', name: s.name, qty: 1, length_m: s.length.toFixed(3), area_m2: (s.length * (s.height || 0)).toFixed(3), notes: '' }));
+    sceneObjects.forEach(o => {
+        const m = o.mesh;
+        if (!m || !m.userData) return;
+        if (m.userData.kind === 'room' && m.userData.room) {
+            rows.push({ kind: 'room', name: m.name, qty: 1, length_m: '', area_m2: m.userData.room.area.toFixed(3), notes: m.userData.room.level || '' });
+        }
+        if (m.userData.opening) {
+            rows.push({ kind: m.userData.kind || 'opening', name: m.name, qty: 1, length_m: m.userData.opening.width, area_m2: (m.userData.opening.width * m.userData.opening.height).toFixed(3), notes: 'component' });
+        }
+    });
+    const csv = BK.buildScheduleCsv(rows.length ? rows : [{ kind: 'empty', name: '', qty: 0, length_m: '', area_m2: '', notes: 'draw walls first' }]);
+    triggerDownload('data:text/csv;charset=utf-8,' + encodeURIComponent(csv), '3DCore_schedule.csv');
+    setVCB('Schedule:', `${rows.length} row(s)`);
+}
+
+function exportPlanDXF() {
+    const lines = collectWallSegments().map(s => ({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer: 'WALLS' }));
+    sceneObjects.forEach(o => {
+        if (!o.mesh || o.type !== 'guide') return;
+        const p = o.mesh.geometry && o.mesh.geometry.attributes && o.mesh.geometry.attributes.position;
+        if (!p || p.count < 2) return;
+        const a = new THREE.Vector3().fromBufferAttribute(p, 0).applyMatrix4(o.mesh.matrixWorld);
+        const b = new THREE.Vector3().fromBufferAttribute(p, p.count - 1).applyMatrix4(o.mesh.matrixWorld);
+        lines.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, layer: 'GUIDES' });
+    });
+    if (!lines.length) { setVCB('DXF:', 'No wall segments to export'); return; }
+    const text = (window.FormatIO && FormatIO.serializeDXF) ? FormatIO.serializeDXF(lines) : (window.BimKit && BimKit.serializeDXF(lines));
+    triggerDownload('data:application/dxf;charset=utf-8,' + encodeURIComponent(text), '3DCore_plan.dxf');
+    setVCB('DXF:', `${lines.length} LINE(s) — plan view only, not DWG`);
+}
+
+function alignSelectionToFloor() {
+    const targets = outlinerMultiSelect.size ? [...outlinerMultiSelect] : (selectedObject ? [selectedObject] : []);
+    if (!targets.length) { setVCB('Align:', 'Select an object'); return; }
+    targets.forEach(mesh => {
+        const box = new THREE.Box3().setFromObject(mesh);
+        mesh.position.z -= box.min.z;
+    });
+    setVCB('Align:', 'Min Z → 0 (floor)');
+}
+
+function addCameraObject() {
+    const helper = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.28, 12), new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0x335577, emissiveIntensity: 0.4 }));
+    helper.rotation.x = Math.PI / 2;
+    const group = new THREE.Group();
+    group.add(helper);
+    group.position.copy(camera.position);
+    group.quaternion.copy(camera.quaternion);
+    group.name = nextName('Camera');
+    group.userData.kind = 'camera';
+    group.userData.camera = { fov: camera.fov, target: orbitControls.target.toArray() };
+    scene.add(group);
+    sceneObjects.push({ name: group.name, type: 'camera', mesh: group });
+    renderOutliner();
+    selectObject(group);
+    pushUndo({
+        undo() { removeSceneObject(group); },
+        redo() { scene.add(group); sceneObjects.push({ name: group.name, type: 'camera', mesh: group }); renderOutliner(); selectObject(group); },
+    });
+    refreshHudContext();
+    setVCB('Camera:', 'Stored current view as a camera object');
+}
+
+function lookThroughSelectedCamera() {
+    const obj = selectedObject;
+    if (!obj || !obj.userData || obj.userData.kind !== 'camera') { setVCB('Camera:', 'Select a camera object'); return; }
+    camera.position.copy(obj.position);
+    camera.quaternion.copy(obj.quaternion);
+    if (obj.userData.camera && obj.userData.camera.target) {
+        orbitControls.target.fromArray(obj.userData.camera.target);
+    }
+    camera.updateProjectionMatrix();
+    markSceneDirty();
+    setVCB('Camera:', 'Looking through ' + obj.name);
+}
+
+function refreshHudContext() {
+    const el = document.getElementById('hud-context');
+    if (!el) return;
+    const lvl = bimLevels[bimActiveLevel] ? bimLevels[bimActiveLevel].name : 'Level 0';
+    const cam = sceneObjects.find(o => o.mesh && o.mesh.userData && o.mesh.userData.kind === 'camera');
+    el.textContent = `${lvl}${cam ? ' · ' + cam.name : ''}`;
+}
+
+function registerPwa() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 // ─────────────────────────────────────────────────────────────
 // VERTEX / EDGE SELECT — real picking + highlight (previously only Face
 // select did anything; Vertex/Edge pills were UI-only). Since faces get
@@ -6507,12 +6929,14 @@ function fixTriWinding(a, b, c, refNormal) {
 // of 3) of mesh.geometry against a LOCAL-space plane, replacing them with
 // the re-triangulated pieces on both sides. Triangles not in the given set
 // pass through unchanged. Returns true if anything was actually cut.
-function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
+function clipTrianglesToPlane(mesh, triangleIndices, localPlane, collectedFaces) {
     ensureNonIndexed(mesh);
     const geo = mesh.geometry;
     const posAttr = geo.attributes.position;
     const triSet = new Set(triangleIndices.map(f => f * 3));
     const outPositions = [];
+    const newSelected = [];
+    let outTri = 0;
     let didCut = false;
 
     for (let i = 0; i < posAttr.count; i += 3) {
@@ -6522,6 +6946,7 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
 
         if (!triSet.has(i)) {
             outPositions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+            outTri++;
             continue;
         }
 
@@ -6530,8 +6955,9 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
         const negPoly = clipTriangleToPlane([a, b, c], localPlane, false);
 
         if (posPoly.length < 3 || negPoly.length < 3) {
-            // Entirely on one side (or degenerate) — keep the original triangle.
             outPositions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+            newSelected.push(outTri);
+            outTri++;
             continue;
         }
         didCut = true;
@@ -6539,6 +6965,8 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
             for (let k = 1; k < poly.length - 1; k++) {
                 const [p0, p1, p2] = fixTriWinding(poly[0], poly[k], poly[k + 1], refNormal);
                 outPositions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+                newSelected.push(outTri);
+                outTri++;
             }
         });
     }
@@ -6550,6 +6978,10 @@ function clipTrianglesToPlane(mesh, triangleIndices, localPlane) {
     newGeo.computeVertexNormals();
     geo.dispose();
     mesh.geometry = newGeo;
+    if (collectedFaces) {
+        collectedFaces.length = 0;
+        newSelected.forEach(f => collectedFaces.push(f));
+    }
     return true;
 }
 
@@ -6619,7 +7051,62 @@ function knifeSelectedFace(mesh, p1World, p2World) {
     const planeNormal = lineDir.clone().cross(avgNormal).normalize();
     const localPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, p1);
 
-    return clipTrianglesToPlane(mesh, selectedFaces, localPlane);
+    const nextFaces = [];
+    const ok = clipTrianglesToPlane(mesh, selectedFaces, localPlane, nextFaces);
+    if (ok && nextFaces.length) selectedFaces = nextFaces;
+    return ok;
+}
+
+function drawKnifePreview() {
+    if (!suCtx || !suCanvas || !camera) return;
+    suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
+    if (!sketchState || sketchState.tool !== 'knife' || !sketchState.points || sketchState.points.length === 0) return;
+    const rect = suCanvas.getBoundingClientRect();
+    suCtx.strokeStyle = '#ffcc44';
+    suCtx.fillStyle = '#ffcc44';
+    suCtx.lineWidth = 1.5;
+    suCtx.setLineDash([5, 3]);
+    suCtx.beginPath();
+    sketchState.points.forEach((p, i) => {
+        const scr = projectWorldToClient(p, rect);
+        if (!scr) return;
+        const x = scr.x - rect.left, y = scr.y - rect.top;
+        if (i === 0) suCtx.moveTo(x, y); else suCtx.lineTo(x, y);
+        suCtx.fillRect(x - 2, y - 2, 4, 4);
+    });
+    suCtx.stroke();
+    suCtx.setLineDash([]);
+}
+
+function finishKnife() {
+    if (!sketchState || sketchState.tool !== 'knife' || !sketchState.points || sketchState.points.length < 2) {
+        setVCB('Knife:', 'Need 2+ points, then Enter');
+        return;
+    }
+    const obj = selectedObject;
+    if (!obj || !obj.isMesh) { cancelSketchTool(); return; }
+    const pts = sketchState.points.slice();
+    const beforeGeo = deepCloneGeometry(obj.geometry);
+    const beforeFaces = selectedFaces.slice();
+    let cuts = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+        if (knifeSelectedFace(obj, pts[i], pts[i + 1])) cuts++;
+    }
+    sketchState = null;
+    if (suCtx) suCtx.clearRect(0, 0, suCanvas.width, suCanvas.height);
+    if (cuts) {
+        const afterGeo = deepCloneGeometry(obj.geometry);
+        const afterFaces = selectedFaces.slice();
+        pushUndo({
+            undo() { obj.geometry.dispose(); obj.geometry = beforeGeo; selectedFaces = beforeFaces.slice(); rebuildFaceHighlight(); },
+            redo() { obj.geometry.dispose(); obj.geometry = afterGeo; selectedFaces = afterFaces.slice(); rebuildFaceHighlight(); },
+        });
+        rebuildFaceHighlight();
+        setVCB('Knife:', `${cuts} cut(s) on selected face`);
+    } else {
+        beforeGeo.dispose();
+        setVCB('Knife:', 'Cut line missed the selected face');
+    }
 }
 
 // Loop Cut (scoped to a single selected quad face — the common case, a box
@@ -7206,6 +7693,15 @@ function executeMeshEditTool(tool) {
             break;
         case 'extrude_to_cursor': // builtin.extrude_to_cursor — armed via setActiveTool; click a point to extrude to
             setVCB('Extrude to Cursor:', 'Select a face, then click a point in the viewport');
+            break;
+        case 'grow':
+            growFaceSelection();
+            break;
+        case 'shrink':
+            shrinkFaceSelection();
+            break;
+        case 'linked':
+            selectLinkedFaces();
             break;
     }
 
@@ -9256,8 +9752,209 @@ function exportSTL() {
     setVCB('Exported:', '3DCore_Project.stl');
 }
 
+function dataUrlToBytes(dataUrl) {
+    const b64 = String(dataUrl || '').split(',')[1] || '';
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+
+function exportGLBBuffer() {
+    return new Promise((resolve, reject) => {
+        const exportGroup = new THREE.Group();
+        sceneObjects
+            .filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh)
+            .forEach(o => exportGroup.add(o.mesh.clone()));
+        if (exportGroup.children.length === 0) { resolve(null); return; }
+        const exporter = new THREE.GLTFExporter();
+        try {
+            exporter.parse(
+                exportGroup,
+                result => {
+                    if (!(result instanceof ArrayBuffer)) {
+                        reject(new Error('GLB exporter did not return binary data'));
+                        return;
+                    }
+                    resolve(result);
+                },
+                { binary: true }
+            );
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+async function exportClientPack() {
+    const Zip = window.ZipStore;
+    if (!Zip || !Zip.buildZip) {
+        alert('Zip builder failed to load (js/zip_store.js).');
+        return;
+    }
+    setVCB('Pack:', 'Building client zip…');
+    const files = [
+        {
+            name: 'README.txt',
+            data: [
+                '3D Core Studio — client pack',
+                '',
+                'project.3dcore.json  Open in 3D Core (File → Open Project).',
+                'preview.png          Still from the current camera (WebGL PBR, not a path tracer).',
+                'model.glb            Mesh export if the scene had meshes. Blender / Unity / phone AR viewers.',
+                '',
+                'Not included: USDZ, FBX, DWG, SKP, IFC. Those encoders are not in this app.',
+                'VR/AR is WebXR in a headset/phone browser on HTTPS or localhost — not a file in this zip.',
+            ].join('\n'),
+        },
+        { name: 'project.3dcore.json', data: JSON.stringify(sceneToJSON(), null, 2) },
+    ];
+    try {
+        const png = captureStillDataUrl(1280, 720);
+        if (png && png.indexOf('data:image/png') === 0) {
+            files.push({ name: 'preview.png', data: dataUrlToBytes(png) });
+        }
+    } catch (err) {
+        console.warn('Client pack preview failed:', err);
+    }
+    try {
+        const glb = await exportGLBBuffer();
+        if (glb) files.push({ name: 'model.glb', data: glb });
+    } catch (err) {
+        console.warn('Client pack GLB failed:', err);
+    }
+    const zipBytes = Zip.buildZip(files);
+    downloadBlob(new Blob([zipBytes], { type: 'application/zip' }), '3DCore_ClientPack.zip');
+    setVCB('Pack:', '3DCore_ClientPack.zip');
+}
+
 let xrWorldScale = 1;
 let xrActiveSession = null;
+let xrSessionKind = null;
+let xrHitTestSource = null;
+let xrARHitPose = null;
+let xrARReticle = null;
+
+function ensureARReticle() {
+    if (xrARReticle) return xrARReticle;
+    const geo = new THREE.RingGeometry(0.06, 0.09, 32);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x88e0ff, side: THREE.DoubleSide, depthTest: false,
+        transparent: true, opacity: 0.9
+    });
+    xrARReticle = new THREE.Mesh(geo, mat);
+    xrARReticle.name = '_ar_reticle';
+    xrARReticle.renderOrder = 1000;
+    xrARReticle.visible = false;
+    xrARReticle.raycast = function () {};
+    scene.add(xrARReticle);
+    return xrARReticle;
+}
+let xrFrame = null;
+
+function xrMeshTargets() {
+    return sceneObjects.filter(o => o.mesh && o.mesh.isMesh).map(o => o.mesh);
+}
+
+function xrTeleportToWorldPoint(point) {
+    if (!point || !renderer || !renderer.xr) return;
+    const xrCam = renderer.xr.getCamera ? renderer.xr.getCamera() : camera;
+    if (xrCam && xrCam.updateMatrixWorld) xrCam.updateMatrixWorld();
+    const camPos = new THREE.Vector3();
+    if (xrCam && xrCam.getWorldPosition) xrCam.getWorldPosition(camPos);
+    else camPos.set(0, 0, 0);
+    scene.position.x += camPos.x - point.x;
+    scene.position.z += camPos.z - point.z;
+    markSceneDirty();
+}
+
+function onXRControllerSelect(ev) {
+    if (xrSessionKind === 'ar' && xrARHitPose) {
+        scene.position.set(xrARHitPose.x, xrARHitPose.y, xrARHitPose.z);
+        markSceneDirty();
+        setVCB('AR:', 'Placed on detected plane (trigger)');
+        return;
+    }
+    const ctrl = ev.target;
+    if (!ctrl || !ctrl.matrixWorld) return;
+    const origin = new THREE.Vector3().setFromMatrixPosition(ctrl.matrixWorld);
+    const dir = new THREE.Vector3(0, 0, -1).transformDirection(ctrl.matrixWorld);
+    _raycaster.set(origin, dir);
+    const hits = _raycaster.intersectObjects(xrMeshTargets(), true);
+    if (hits.length) {
+        xrTeleportToWorldPoint(hits[0].point);
+        setVCB('VR:', 'Teleported to surface');
+        return;
+    }
+    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    if (_raycaster.ray.intersectPlane(floor, hit)) {
+        xrTeleportToWorldPoint(hit);
+        setVCB('VR:', 'Teleported to floor');
+    }
+}
+
+function bindXRControllers() {
+    if (!renderer || !renderer.xr || !renderer.xr.getController) return;
+    [0, 1].forEach(i => {
+        const c = renderer.xr.getController(i);
+        if (!c.userData.xrSelectBound) {
+            c.addEventListener('select', onXRControllerSelect);
+            c.userData.xrSelectBound = true;
+        }
+        scene.add(c);
+    });
+}
+
+async function setupARHitTest(session) {
+    xrHitTestSource = null;
+    xrARHitPose = null;
+    try {
+        const viewerSpace = await session.requestReferenceSpace('viewer');
+        if (session.requestHitTestSource) {
+            xrHitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+        }
+    } catch (e) {
+        xrHitTestSource = null;
+    }
+}
+
+function pollARHitTest() {
+    if (!xrHitTestSource || !xrFrame || !renderer || !renderer.xr) return;
+    const ref = renderer.xr.getReferenceSpace ? renderer.xr.getReferenceSpace() : null;
+    if (!ref || !xrFrame.getHitTestResults) return;
+    const results = xrFrame.getHitTestResults(xrHitTestSource);
+    if (!results.length) {
+        xrARHitPose = null;
+        if (xrARReticle) xrARReticle.visible = false;
+        return;
+    }
+    const pose = results[0].getPose(ref);
+    if (!pose || !pose.transform || !pose.transform.position) {
+        xrARHitPose = null;
+        if (xrARReticle) xrARReticle.visible = false;
+        return;
+    }
+    const p = pose.transform.position;
+    xrARHitPose = { x: p.x, y: p.y, z: p.z };
+    const ring = ensureARReticle();
+    const world = new THREE.Vector3(p.x, p.y, p.z);
+    if (ring.parent) ring.parent.worldToLocal(world);
+    ring.position.copy(world);
+    const o = pose.transform.orientation;
+    if (o) {
+        const qWorld = new THREE.Quaternion(o.x, o.y, o.z, o.w);
+        if (ring.parent) {
+            const qParent = new THREE.Quaternion();
+            ring.parent.getWorldQuaternion(qParent);
+            ring.quaternion.copy(qParent.invert()).multiply(qWorld);
+        } else {
+            ring.quaternion.copy(qWorld);
+        }
+    }
+    ring.visible = true;
+}
 
 function setXRWorldScale(value) {
     const n = parseFloat(value);
@@ -9280,6 +9977,7 @@ function applyXRScenePose(on) {
     } else {
         scene.rotation.x = 0;
         scene.scale.set(1, 1, 1);
+        scene.position.set(0, 0, 0);
     }
 }
 
@@ -9314,6 +10012,14 @@ async function refreshXRButtons() {
 function endXRSessionCleanup() {
     xrAnimating = false;
     xrActiveSession = null;
+    xrSessionKind = null;
+    xrARHitPose = null;
+    if (xrARReticle) xrARReticle.visible = false;
+    if (xrHitTestSource && xrHitTestSource.cancel) {
+        try { xrHitTestSource.cancel(); } catch (e) { /* already ended */ }
+    }
+    xrHitTestSource = null;
+    xrFrame = null;
     applyXRScenePose(false);
     if (orbitControls) orbitControls.enabled = true;
     if (renderer && renderer.setAnimationLoop) renderer.setAnimationLoop(null);
@@ -9329,17 +10035,23 @@ async function startXRSession(session, kind) {
         return;
     }
     xrActiveSession = session;
+    xrSessionKind = kind;
     applyXRScenePose(true);
     if (orbitControls) orbitControls.enabled = false;
     if (transformControls) transformControls.detach();
+    bindXRControllers();
+    if (kind === 'ar') await setupARHitTest(session);
     xrAnimating = true;
-    renderer.setAnimationLoop(() => renderTick(true));
+    renderer.setAnimationLoop((time, frame) => {
+        xrFrame = frame || null;
+        renderTick(true);
+    });
     session.addEventListener('end', endXRSessionCleanup);
     const maybePromise = renderer.xr.setSession(session);
     if (maybePromise && typeof maybePromise.then === 'function') await maybePromise;
     setVCB(kind === 'ar' ? 'AR:' : 'VR:', kind === 'ar'
-        ? 'Immersive AR session'
-        : 'Immersive VR session — 1 scene meter = 1 real meter at scale 1:1');
+        ? 'Immersive AR — pull trigger on a detected plane to place'
+        : 'Immersive VR — 1 scene meter = 1 real meter at 1:1. Trigger teleports');
 }
 
 async function enterVR() {
@@ -9689,6 +10401,22 @@ function executeAIAction(action) {
             case 'new_scene':
                 newScene();
                 return '✓ New scene';
+
+            case 'add_wall':
+                setActiveTool('wall');
+                return '✓ Wall tool — click points in the viewport';
+
+            case 'make_rooms':
+                makeRoomsFromWalls();
+                return '✓ Tried to make rooms from closed walls';
+
+            case 'add_door_component':
+                addDoorComponent();
+                return '✓ Door component added';
+
+            case 'export_schedule':
+                exportScheduleCsv();
+                return '✓ Schedule CSV download started';
 
             default:
                 return `✗ Unknown action: ${tool}`;
@@ -10404,7 +11132,13 @@ function showKeyboardShortcuts() {
             <b>Tab</b><span>Object ⇄ Edit Mode</span>
             <b>1 / 2 / 3</b><span>Vertex / Edge / Face select (Edit Mode)</span>
             <b>E</b><span>Eraser tool</span>
-            <b>L</b><span>Line tool (SketchUp CAD workspace)</span>
+            <b>L</b><span>Select Linked (Edit + Face) / Line (SketchUp CAD)</span>
+            <b>Ctrl+= / Ctrl+-</b><span>Grow / shrink face selection</span>
+            <b>PE chip</b><span>Proportional object translate falloff</span>
+            <b>Lasso / Box / Circle</b><span>Region select — objects, or faces in Edit+Face. Shift adds</span>
+            <b>Loop / Fill</b><span>Face loop walk / boundary fan-fill (not half-edge)</span>
+            <b>ROOM / LEVEL / SCHEDULE / DXFOUT</b><span>BIM rooms, storeys, CSV, plan DXF</span>
+            <b>CAMERA / LOOKCAM</b><span>Store current view / look through camera object</span>
             <b>C</b><span>Circle tool (SketchUp CAD workspace)</span>
             <b>A</b><span>Arc tool (SketchUp CAD) — elsewhere: Select All / Deselect</span>
             <b>P / U</b><span>Push/Pull tool</span>
@@ -10419,6 +11153,7 @@ function showKeyboardShortcuts() {
             <b>Shift+D</b><span>Duplicate</span>
             <b>F5</b><span>Present mode (fullscreen client view)</span>
             <b>F10 / Ctrl+Shift+S</b><span>Screenshot current view (PNG)</span>
+            <b>PACK</b><span>Client zip (project + preview PNG + GLB)</span>
             <b>VR / AR commands</b><span>ENTERVR / ENTERAR (headset or GLB fallback)</span>
             <b>F12</b><span>Render (Rendered shading)</span>
             <b>Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y</b><span>Undo / Redo</span>
@@ -10474,14 +11209,15 @@ function openHelpDesk() {
             <li><b>GLB</b> — full scene round-trip (meshes + materials).</li>
             <li><b>OBJ / STL</b> — triangle meshes. STL is geometry only (3D print). These read and write real bytes from your file.</li>
             <li><b>DXF</b> — ASCII LINE and LWPOLYLINE only, turned into wall layers. Not DWG, and not a full CAD kernel.</li>
+            <li><b>Client pack (ZIP)</b> — project JSON + preview PNG + GLB (if meshes exist). File → Client Pack or command PACK. Not USDZ.</li>
             <li>FBX / SKP / IFC / USDZ are <b>not</b> in the menu because this app does not decode them yet.</li>
         </ul>
 
         <b>VR / AR</b>
         <ul style="margin:4px 0 10px 16px; padding:0;">
-            <li><b>Enter VR</b> starts a WebXR <code>immersive-vr</code> session when the browser reports one (Quest Browser, Chrome on a compatible headset). The scene is rotated from Z-up to Y-up for the headset. Scale 1:1 / 1:10 / 1:50 is in the Output panel.</li>
+            <li><b>Enter VR</b> starts a WebXR <code>immersive-vr</code> session when the browser reports one (Quest Browser, Chrome on a compatible headset). The scene is rotated from Z-up to Y-up for the headset. Scale 1:1 / 1:10 / 1:50 is in the Output panel. Controller trigger teleports onto a mesh or the floor.</li>
             <li>If VR is unavailable the button stays disabled — it does not fake a headset view.</li>
-            <li><b>Place in AR</b> uses WebXR <code>immersive-ar</code> when the phone supports it. Otherwise it exports a GLB for a phone AR viewer. There is no USDZ encoder and no webcam “fake AR”.</li>
+            <li><b>Place in AR</b> uses WebXR <code>immersive-ar</code> when the phone supports it. If hit-test is available, trigger places the model on a detected plane. Otherwise it exports a GLB for a phone AR viewer. There is no USDZ encoder and no webcam “fake AR”.</li>
             <li>WebXR needs HTTPS or <code>http://127.0.0.1</code>.</li>
         </ul>
 
@@ -10526,9 +11262,13 @@ function applyRenderQuality(name) {
     if (!RQ) return;
     const preset = RQ.PRESETS[name] || RQ.PRESETS.balanced;
     renderQualityName = preset.id;
-    const dpr = RQ.clampPixelRatio(window.devicePixelRatio || 1, preset.pixelRatioCap);
+    const clampPR = RQ.clampPixelRatio || RQ.clampPixelRatio;
+    const cap = preset.pixelRatioCap != null ? preset.pixelRatioCap : preset.pixelRatioCap;
+    const dpr = clampPR(window.devicePixelRatio || 1, cap);
     renderer.setPixelRatio(dpr);
-    const smType = RQ.shadowMapConstant(THREE, preset.shadowType);
+    const smConst = RQ.shadowMapConstant || RQ.shadowMapConstant;
+    const smKind = preset.shadowType || preset.shadowType;
+    const smType = smConst(THREE, smKind);
     if (smType != null) renderer.shadowMap.type = smType;
     if (preset.shadows) {
         toggleShadows(userShadowPref, true);
@@ -10564,8 +11304,72 @@ function applyRenderQuality(name) {
     }
     const qSel = document.getElementById('quality-select');
     if (qSel) qSel.value = preset.id;
+    if (preset.exposure != null) setEngineExposure(preset.exposure, true);
+    if (preset.envIntensity != null) setEngineEnvIntensity(preset.envIntensity, true);
     markSceneDirty();
     setVCB('Quality:', preset.id.charAt(0).toUpperCase() + preset.id.slice(1));
+}
+
+function setEngineExposure(val, quiet) {
+    const RQ = window.RenderQuality;
+    engineExposure = RQ && RQ.clampExposure ? RQ.clampExposure(val) : Math.max(0.1, Math.min(3, Number(val) || 1));
+    if (renderer) renderer.toneMappingExposure = engineExposure;
+    const sl = document.getElementById('exposure-slider');
+    if (sl && sl.value !== String(engineExposure)) sl.value = engineExposure;
+    const lab = document.getElementById('exposure-value');
+    if (lab) lab.textContent = engineExposure.toFixed(2);
+    markSceneDirty();
+    if (!quiet) setVCB('Exposure:', engineExposure.toFixed(2));
+}
+
+function applyEnvIntensityToScene() {
+    if (!scene) return;
+    scene.traverse(obj => {
+        const mats = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
+        mats.forEach(m => {
+            if (m && m.envMapIntensity != null) m.envMapIntensity = engineEnvIntensity;
+        });
+    });
+}
+
+function setEngineEnvIntensity(val, quiet) {
+    const RQ = window.RenderQuality;
+    engineEnvIntensity = RQ && RQ.clampEnvIntensity ? RQ.clampEnvIntensity(val) : Math.max(0, Math.min(4, Number(val) || 1));
+    applyEnvIntensityToScene();
+    const sl = document.getElementById('env-intensity-slider');
+    if (sl && sl.value !== String(engineEnvIntensity)) sl.value = engineEnvIntensity;
+    const lab = document.getElementById('env-intensity-value');
+    if (lab) lab.textContent = engineEnvIntensity.toFixed(2);
+    markSceneDirty();
+    if (!quiet) setVCB('IBL:', engineEnvIntensity.toFixed(2));
+}
+
+function applyLightingPreset(id) {
+    const RQ = window.RenderQuality;
+    if (!RQ || !RQ.LIGHTING) return;
+    let key = id;
+    if (key === 'overcast' && !RQ.LIGHTING.overcast) key = 'overcast';
+    const L = RQ.LIGHTING[key] || RQ.LIGHTING.overcast || RQ.LIGHTING.studio;
+    lightingPresetName = L.id;
+    lightingSunScale = L.sunIntensityScale;
+    setTimeOfDay(L.hours);
+    setEngineExposure(L.exposure, true);
+    setEngineEnvIntensity(L.envIntensity, true);
+    if (L.ibl) {
+        toggleHdriEnvironment(true);
+        const hdri = document.getElementById('hdri-toggle');
+        if (hdri) hdri.checked = true;
+    }
+    const sel = document.getElementById('lighting-preset-select');
+    if (sel) sel.value = id;
+    markSceneDirty();
+    setVCB('Lighting:', (L.label || L.id) + ' (WebGL PBR)');
+}
+
+function pingStudioService() {
+    fetch('/api/status').then(r => r.json()).then(s => {
+        if (s && s.renderer_label) setVCB('Service:', s.renderer_label);
+    }).catch(() => {});
 }
 
 function withPresentationHelpersHidden(fn) {

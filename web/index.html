@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3D Core Studio — Blender 4.0 & SketchUp Professional Suite</title>
+<title>3D Core Studio</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#2f6fdc">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%235b9bd5'/%3E%3Cstop offset='100%25' stop-color='%232f6fdc'/%3E%3C/linearGradient%3E%3ClinearGradient id='gem' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%237ee8fa'/%3E%3Cstop offset='55%25' stop-color='%234a6fe8'/%3E%3Cstop offset='100%25' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='2' y='2' width='60' height='60' rx='16' fill='url(%23bg)'/%3E%3Ctext x='32' y='43' font-family='Arial,sans-serif' font-weight='900' font-size='28' fill='%23e8edf5' text-anchor='middle'%3E3D%3C/text%3E%3Cpolygon points='32,17 43,23.5 43,36.5 32,43 21,36.5 21,23.5' fill='url(%23gem)' stroke='%23fff' stroke-width='1' opacity='0.92'/%3E%3Cpolygon points='32,17 43,23.5 32,30 21,23.5' fill='%23a5f3fc' opacity='0.55'/%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
@@ -49,6 +51,9 @@
         <div class="top-menu-dropdown-item" onclick="triggerImportImage()">Import Image (Floorplan)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportOBJ()">Export OBJ <span class="kbd"></span></div>
         <div class="top-menu-dropdown-item" onclick="exportSTL()">Export STL <span class="kbd"></span></div>
+        <div class="top-menu-dropdown-item" onclick="exportPlanDXF()">Export Plan DXF (walls)…</div>
+        <div class="top-menu-dropdown-item" onclick="exportScheduleCsv()">Export BIM Schedule (CSV)…</div>
+        <div class="top-menu-dropdown-item" onclick="exportClientPack()">Client Pack (ZIP)… <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
         <div class="top-menu-dropdown-item" onclick="deleteAllGuides()">Delete All Guides <span class="kbd"></span></div>
         <div class="top-menu-dropdown-sep"></div>
@@ -108,9 +113,7 @@
 
   <div class="top-header-right">
     <div style="font-size:10.5px; color:var(--b-text-sub); display:flex; gap:6px;">
-      <span>Scene</span>
-      <span>|</span>
-      <span>ViewLayer</span>
+      <span id="hud-context">Level 0</span>
     </div>
   </div>
 </header>
@@ -151,6 +154,7 @@
           <div class="top-menu-dropdown-item" onclick="deselectAllMeshes()">Deselect All</div>
           <div class="top-menu-dropdown-item" onclick="setActiveTool('select_box')">Box Select</div>
           <div class="top-menu-dropdown-item" onclick="setActiveTool('select_circle')">Circle Select</div>
+          <div class="top-menu-dropdown-item" onclick="setActiveTool('select_lasso')">Lasso Select</div>
         </div>
       </div>
       <div class="v-sub-item" onclick="addPrimitive('cube')">Add</div>
@@ -169,6 +173,7 @@
   <div style="display:flex; align-items:center; gap:8px;">
     <button type="button" id="space-chip" class="hud-chip" onclick="toggleTransformSpace()" title="Click to toggle transform space (Global / Local)">🌐 Global</button>
     <button type="button" id="snap-chip" class="hud-chip" onclick="toggleGridSnap(event)" title="Click to toggle grid snap. Shift-click to cycle increment.">🧲 Snap: 1m</button>
+    <button type="button" id="prop-chip" class="hud-chip chip-off" onclick="toggleProportionalEdit(event)" title="Proportional object falloff while translating with the gizmo. Shift-click cycles radius. CAD: PE. Not vertex PE.">○ PE: Off</button>
   </div>
 
   <div class="v-toolbar-right">
@@ -248,8 +253,11 @@
     <button class="su-palette-btn" id="tb-select_box" onclick="setActiveTool('select_box')" title="Select Box — drag a rectangle over an object">
       <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
     </button>
-    <button class="su-palette-btn" id="tb-select_circle" onclick="setActiveTool('select_circle')" title="Select Circle — drag a circle over an object">
+    <button class="su-palette-btn" id="tb-select_circle" onclick="setActiveTool('select_circle')" title="Select Circle — drag a circle over objects (Shift adds; Edit+Face selects faces)">
       <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-select_lasso" onclick="setActiveTool('select_lasso')" title="Select Lasso — drag a freehand region (Shift adds; Edit+Face selects faces)">
+      <svg viewBox="0 0 20 20"><path d="M4 12 C4 6 8 3 12 4 C16 5 17 10 14 13 C12 15 8 16 6 14 C5 13 4 13 4 12 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
     </button>
 
     <div class="su-tool-sep"></div>
@@ -548,11 +556,33 @@
               <button class="transport-btn" onclick="setActiveTool('vertex_slide')" title="Vertex Select a corner (pill above), click this, then drag on the mesh">Vertex Slide</button>
               <button class="transport-btn" onclick="setActiveTool('edge_slide')" title="Edge Select an edge (pill above), click this, then drag on the mesh">Edge Slide</button>
               <button class="transport-btn" onclick="setActiveTool('bisect')" title="Click this, then drag a line across the viewport to cut the mesh with a plane">Bisect</button>
-              <button class="transport-btn" onclick="setActiveTool('knife')" title="Face Select a face, click this, then click two points on it to cut">Knife (on selected face)</button>
+              <button class="transport-btn" onclick="setActiveTool('knife')" title="Face Select a face, click a cut polyline on it, Enter to cut">Knife polyline (selected face)</button>
               <button class="transport-btn" onclick="executeMeshEditTool('loopcut')" title="Splits the selected face into two along its longest axis">Loop Cut (selected face)</button>
               <button class="transport-btn" onclick="setActiveTool('poly_build')" title="Click points in the viewport to build a new face, double-click/Enter to finish">Poly Build</button>
               <button class="transport-btn" onclick="runDeleteSubElement()" title="Delete/Dissolve (X) the selected face/vertex/edge">Delete Selection</button>
               <button class="transport-btn" onclick="runMergeByDistance()" title="Merge by Distance (M) — welds nearby vertices">Merge by Distance</button>
+              <button class="transport-btn" onclick="growFaceSelection()" title="Grow face selection across shared edges (Ctrl+=)">Grow Faces</button>
+              <button class="transport-btn" onclick="shrinkFaceSelection()" title="Shrink face selection (Ctrl+-)">Shrink Faces</button>
+              <button class="transport-btn" onclick="selectLinkedFaces()" title="Select all faces connected by shared edges (L in Edit + Face select)">Select Linked</button>
+              <button class="transport-btn" onclick="selectFaceLoop()" title="Walk similar-normal neighbors from the seed face">Select Face Loop</button>
+              <button class="transport-btn" onclick="fillSelectedHole()" title="Fan-fill an open boundary (not a n-gon fill)">Fill Hole</button>
+            </div>
+          </div>
+
+          <div class="b-accordion-box" id="bim-tools-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ BIM (honest — walls / rooms / components)</div>
+            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button class="transport-btn" onclick="makeRoomsFromWalls()" title="Closed wall loops become room slabs with area">Make Rooms</button>
+              <button class="transport-btn" onclick="addDoorComponent()" title="Door mesh component — Opening tool still cuts the hole">Add Door</button>
+              <button class="transport-btn" onclick="addWindowComponent()" title="Window mesh component">Add Window</button>
+              <button class="transport-btn" onclick="addStorey()" title="Add a 3 m storey; new walls sit on it">Add Level</button>
+              <button class="transport-btn" onclick="isolateActiveStorey(true)">Isolate Level</button>
+              <button class="transport-btn" onclick="isolateActiveStorey(false)">Show All Levels</button>
+              <button class="transport-btn" onclick="alignSelectionToFloor()">Align to Floor</button>
+              <button class="transport-btn" onclick="addCameraObject()">Add Camera</button>
+              <button class="transport-btn" onclick="lookThroughSelectedCamera()">Look Through Camera</button>
+              <button class="transport-btn" onclick="exportScheduleCsv()">Schedule CSV</button>
+              <button class="transport-btn" onclick="exportPlanDXF()">Plan DXF</button>
             </div>
           </div>
 
@@ -768,7 +798,26 @@
                   <option value="present">Present</option>
                 </select>
               </div>
-              <div style="font-size:9.5px; color:var(--b-text-muted); margin-top:4px;">WebGL PBR. Draft caps pixel ratio and turns shadows off. Present raises shadow maps and optional SSAO.</div>
+              <div style="font-size:9.5px; color:var(--b-text-muted); margin-top:4px;">WebGL PBR. Draft caps pixel ratio and turns shadows off. Present raises shadow maps and optional SSAO. Not a path tracer.</div>
+              <div class="prop-numeric-row" style="margin-top:8px;">
+                <span class="prop-label">Lighting</span>
+                <select id="lighting-preset-select" style="flex:1; font-size:10px;" onchange="applyLightingPreset(this.value)" title="Moves the sun and IBL knobs. WebGL PBR, not a Cycles world.">
+                  <option value="studio" selected>Studio noon</option>
+                  <option value="overcast">Overcast</option>
+                  <option value="dusk">Dusk</option>
+                  <option value="night">Night</option>
+                </select>
+              </div>
+              <div class="prop-numeric-row" style="margin-top:6px;">
+                <span class="prop-label">Exposure</span>
+                <input type="range" id="exposure-slider" min="0.1" max="3" step="0.05" value="1" style="flex:1;" oninput="setEngineExposure(this.value)">
+                <span id="exposure-value" style="width:32px; font-size:10px; color:var(--b-text-muted);">1.00</span>
+              </div>
+              <div class="prop-numeric-row" style="margin-top:4px;">
+                <span class="prop-label">IBL</span>
+                <input type="range" id="env-intensity-slider" min="0" max="3" step="0.05" value="1" style="flex:1;" oninput="setEngineEnvIntensity(this.value)" title="MeshStandardMaterial.envMapIntensity">
+                <span id="env-intensity-value" style="width:32px; font-size:10px; color:var(--b-text-muted);">1.00</span>
+              </div>
               <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:#ccc; cursor:pointer;">
                 <input type="checkbox" id="shadow-toggle-checkbox" checked onchange="toggleShadows(this.checked)">
                 Shadows
@@ -889,6 +938,7 @@
               </div>
               <button id="enter-vr-btn" onclick="enterVR()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Enter VR</button>
               <button id="enter-ar-btn" onclick="enterAR()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Place in AR</button>
+              <button onclick="exportClientPack()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Client Pack (ZIP)</button>
               <button onclick="takeViewportScreenshot()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Screenshot View (F10)</button>
               <button onclick="renderStillImage()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Render Image</button>
               <button onclick="renderAnimationVideo()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Animation (Video)</button>
@@ -1065,6 +1115,7 @@
   <button type="button" onclick="exportPresentSlidePng()">PNG</button>
   <button type="button" onclick="exportAllPresentSlides()">All PNG</button>
   <button type="button" onclick="exportPresentPathVideo()">Path Video</button>
+  <button type="button" onclick="exportClientPack()">Pack</button>
   <select id="present-xr-scale" onchange="setXRWorldScale(this.value)" title="VR/AR world scale">
     <option value="1" selected>1:1</option>
     <option value="0.1">1:10</option>
@@ -1076,6 +1127,9 @@
 </div>
 <script src="js/render_adapter.js"></script>
 <script src="js/format_io.js"></script>
+<script src="js/zip_store.js"></script>
+<script src="js/mesh_tools.js"></script>
+<script src="js/bim_kit.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

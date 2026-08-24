@@ -30,6 +30,54 @@ HOST = os.environ.get("THREED_CORE_HOST", "0.0.0.0")
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
+# Browser client files under web/js and web/css. New modules (zip_store, mesh_tools)
+# must be served without adding a one-off elif per filename.
+_WEB_STATIC_PREFIXES = ("/js/", "/css/", "/manifest.json", "/sw.js")
+_WEB_MIME = {
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".map": "application/json",
+}
+
+
+def safe_file_under(root, rel):
+    """Resolve rel to a real file inside root. Rejects .. and absolute escapes."""
+    rel = (rel or "").replace("\\", "/").lstrip("/")
+    if not rel or any(part == ".." for part in rel.split("/")):
+        return None
+    root_abs = os.path.abspath(root)
+    full = os.path.abspath(os.path.join(root_abs, rel))
+    if full != root_abs and not full.startswith(root_abs + os.sep):
+        return None
+    if not os.path.isfile(full):
+        return None
+    return full
+
+
+def studio_status_payload():
+    glbs = scan_texverse_glbs()
+    return {
+        "ok": True,
+        "app": "3D Core Studio",
+        "renderer": "webgl-pbr",
+        "renderer_label": "Browser WebGL PBR (ACES Filmic). Not Cycles.",
+        "gpu_farm": False,
+        "formats": {
+            "import": ["glb", "gltf", "obj", "stl", "dxf-ascii"],
+            "export": ["glb", "obj", "stl", "png", "webm", "zip-client-pack"],
+        },
+        "assets": {
+            "texverse_glb": len(glbs),
+            "dream_textures": len(DREAM_TEXTURE_PRESETS),
+        },
+        "signaling_ws_port": WS_PORT,
+    }
+
 TEXVERSE_GLB_DIR = os.path.join(ASSETS_DIR, "TexVerse", "glbs", "glbs_1k", "000-000")
 DREAMTEX_DIR = os.path.join(ASSETS_DIR, "textures", "dream-textures-color-1k")
 DEEPFURN_DIR = os.path.join(ASSETS_DIR, "DeepFurniture")
@@ -203,6 +251,26 @@ AI_TOOLS = [
         "description": "Move the sun and change the sky/lighting to a given time of day (0-24 hours).",
         "input_schema": {"type": "object", "properties": {"hours": {"type": "number", "minimum": 0, "maximum": 24}}, "required": ["hours"]},
     },
+    {
+        "name": "add_wall",
+        "description": "Switch to the wall drawing tool. The user still clicks points in the viewport.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "make_rooms",
+        "description": "Create room slabs from closed wall loops already in the scene.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_door_component",
+        "description": "Add a door mesh component (does not boolean-cut a wall).",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "export_schedule",
+        "description": "Download a CSV schedule of walls, rooms, and opening components.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 AI_SYSTEM_PROMPT = (
@@ -333,14 +401,15 @@ class StudioHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         # Static web files
         if path in ('/', '/index.html'):
             self._serve_static(os.path.join(WEB_DIR, 'index.html'), 'text/html; charset=utf-8')
-        elif path == '/css/style.css':
-            self._serve_static(os.path.join(WEB_DIR, 'css', 'style.css'), 'text/css')
-        elif path == '/js/app.js':
-            self._serve_static(os.path.join(WEB_DIR, 'js', 'app.js'), 'application/javascript')
-        elif path == '/js/render_adapter.js':
-            self._serve_static(os.path.join(WEB_DIR, 'js', 'render_adapter.js'), 'application/javascript')
-        elif path == '/js/format_io.js':
-            self._serve_static(os.path.join(WEB_DIR, 'js', 'format_io.js'), 'application/javascript')
+        elif any(path.startswith(prefix) for prefix in _WEB_STATIC_PREFIXES):
+            full = safe_file_under(WEB_DIR, path.lstrip('/'))
+            if not full:
+                self.send_response(404); self.end_headers(); return
+            ext = os.path.splitext(full)[1].lower()
+            self._serve_static(full, _WEB_MIME.get(ext, 'application/octet-stream'))
+
+        elif path in ('/api/status', '/api/health'):
+            self._send_json(studio_status_payload())
 
         # Serve TexVerse GLB files directly
         elif path.startswith('/assets/texverse/') and path.endswith('.glb'):

@@ -1,0 +1,9 @@
+{
+  "name": "3D Core Studio",
+  "short_name": "3D Core",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#2f6fdc",
+  "description": "Browser CAD / 3D editor. WebGL PBR, not a path tracer."
+}

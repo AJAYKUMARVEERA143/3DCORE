@@ -37,7 +37,9 @@ ROADMAP also refers to Playwright scripts that are not in this tree.
 | --- | --- |
 | `web/js/app.js` | All application logic (scene, tools, CSG, sculpt, persist, AI client, P2P, Present mode) |
 | `web/js/render_adapter.js` | Quality ladder (Draft / Balanced / Present) + still supersample math |
-| `web/index.html` | UI shell |
+| `web/js/bim_kit.js` | Rooms / schedule CSV / plan DXF helpers (no Three.js) |
+| `web/js/format_io.js` | OBJ / STL / ASCII DXF helpers |
+| `web/js/zip_store.js` | Client ZIP pack |
 | `web/index.html` | UI shell |
 | `web/css/style.css` | Styles |
 | `server.py` | HTTP + WebSocket signaling |
@@ -50,7 +52,7 @@ CDN Three.js r128 is loaded from `index.html`. Do not add a second renderer impl
 
 `main.py` and everything under `src/` (Python snapper, DXF extruder, GPU collector, `engine.cpp`, etc.) are **print-based prototypes**. They are not imported by `server.py` and do not drive the browser. Do not extend them as if they were the editor. Prefer implementing features in `web/js/app.js` (or modules split from it) and real HTTP APIs only when the UI calls them.
 
-Unused `server.py` POSTs (`/api/snap`, `/api/extrude`, `/api/ai-generate`, `/api/gpu-render`, `/api/boolean`, `/api/export`) return canned success JSON. Do not wire new UI to them until they do real work; prefer deleting them or returning 501.
+Unused `server.py` POSTs (`/api/snap`, `/api/extrude`, `/api/ai-generate`, `/api/gpu-render`, `/api/boolean`, `/api/export`) return **501** `NOT_IMPLEMENTED`. `GET /api/status` reports `renderer: webgl-pbr` (not a GPU farm / Cycles). Do not wire new UI to stub POSTs until they do real work.
 
 ## Design rules (from ROADMAP)
 
