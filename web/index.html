@@ -152,6 +152,7 @@
           <div class="top-menu-dropdown-item" onclick="deselectAllMeshes()">Deselect All</div>
           <div class="top-menu-dropdown-item" onclick="setActiveTool('select_box')">Box Select</div>
           <div class="top-menu-dropdown-item" onclick="setActiveTool('select_circle')">Circle Select</div>
+          <div class="top-menu-dropdown-item" onclick="setActiveTool('select_lasso')">Lasso Select</div>
         </div>
       </div>
       <div class="v-sub-item" onclick="addPrimitive('cube')">Add</div>
@@ -250,8 +251,11 @@
     <button class="su-palette-btn" id="tb-select_box" onclick="setActiveTool('select_box')" title="Select Box — drag a rectangle over an object">
       <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
     </button>
-    <button class="su-palette-btn" id="tb-select_circle" onclick="setActiveTool('select_circle')" title="Select Circle — drag a circle over an object">
+    <button class="su-palette-btn" id="tb-select_circle" onclick="setActiveTool('select_circle')" title="Select Circle — drag a circle over objects (Shift adds; Edit+Face selects faces)">
       <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-select_lasso" onclick="setActiveTool('select_lasso')" title="Select Lasso — drag a freehand region (Shift adds; Edit+Face selects faces)">
+      <svg viewBox="0 0 20 20"><path d="M4 12 C4 6 8 3 12 4 C16 5 17 10 14 13 C12 15 8 16 6 14 C5 13 4 13 4 12 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/></svg>
     </button>
 
     <div class="su-tool-sep"></div>
@@ -550,7 +554,7 @@
               <button class="transport-btn" onclick="setActiveTool('vertex_slide')" title="Vertex Select a corner (pill above), click this, then drag on the mesh">Vertex Slide</button>
               <button class="transport-btn" onclick="setActiveTool('edge_slide')" title="Edge Select an edge (pill above), click this, then drag on the mesh">Edge Slide</button>
               <button class="transport-btn" onclick="setActiveTool('bisect')" title="Click this, then drag a line across the viewport to cut the mesh with a plane">Bisect</button>
-              <button class="transport-btn" onclick="setActiveTool('knife')" title="Face Select a face, click this, then click two points on it to cut">Knife (on selected face)</button>
+              <button class="transport-btn" onclick="setActiveTool('knife')" title="Face Select a face, click a cut polyline on it, Enter to cut">Knife polyline (selected face)</button>
               <button class="transport-btn" onclick="executeMeshEditTool('loopcut')" title="Splits the selected face into two along its longest axis">Loop Cut (selected face)</button>
               <button class="transport-btn" onclick="setActiveTool('poly_build')" title="Click points in the viewport to build a new face, double-click/Enter to finish">Poly Build</button>
               <button class="transport-btn" onclick="runDeleteSubElement()" title="Delete/Dissolve (X) the selected face/vertex/edge">Delete Selection</button>

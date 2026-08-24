@@ -341,5 +341,37 @@ console.log('ok');
         self.assertNotIn("Cycles Path Tracer", html)
 
 
+class LassoKnifeARTests(unittest.TestCase):
+    def test_point_in_polygon_via_node(self):
+        import subprocess
+        script = r"""
+const MT = require('./web/js/mesh_tools.js');
+const square = [{x:0,y:0},{x:10,y:0},{x:10,y:10},{x:0,y:10}];
+if (!MT.pointInPolygon(5, 5, square)) process.exit(2);
+if (MT.pointInPolygon(20, 5, square)) process.exit(3);
+if (MT.pointInPolygon(5, 5, square.slice(0, 2))) process.exit(4);
+const tri = [{x:0,y:0},{x:4,y:0},{x:0,y:4}];
+if (!MT.pointInPolygon(1, 1, tri)) process.exit(5);
+if (MT.pointInPolygon(3, 3, tri)) process.exit(6);
+console.log('ok');
+"""
+        proc = subprocess.run(["node", "-e", script], cwd=str(ROOT), capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ok", proc.stdout)
+
+    def test_hooks_in_app_and_html(self):
+        js = (ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function finishKnife", js)
+        self.assertIn("function ensureARReticle", js)
+        self.assertIn("function applyRegionFaceSelect", js)
+        self.assertIn("select_lasso", js)
+        self.assertIn("LASSO:", js)
+        self.assertIn("_ar_reticle", js)
+        self.assertIn('id="tb-select_lasso"', html)
+        self.assertIn("Lasso Select", html)
+        self.assertIn("Knife polyline", html)
+
+
 if __name__ == "__main__":
     unittest.main()
