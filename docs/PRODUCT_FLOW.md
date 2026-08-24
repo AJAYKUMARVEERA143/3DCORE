@@ -194,17 +194,19 @@ Each wave ships a **file or a mode** the user can click. No wave is “research 
 
 ## 7. What we already have vs what we add
 
-| Already in the app | Add next |
+| Already in the app | Will not ship (honest) |
 | --- | --- |
-| Draw, mesh, sculpt, BIM walls, grow/linked faces, object PE, **lasso/box/circle region select**, **knife polyline on a selected face** | Vertex PE (needs half-edge) |
-| GLB, OBJ, STL, ASCII DXF walls, `.3dcore.json` | IFC / USD / DWG only if a real WASM decoder exists |
-| PNG still + WebM + screenshot + **client ZIP pack** | Optional USDZ if an encoder is wired |
-| Lights, IBL, SSAO, P2P tiles, **exposure + lighting presets (WebGL)** | Path tracing (out of scope) |
-| Present mode + quality ladder | Review-link hosting (not required locally) |
-| WebXR VR + trigger teleport; AR hit-test place or GLB; **AR hit reticle** | Native Vision Pro / USDZ Quick Look |
-| **stdlib server** serves `/js/*` `/css/*` + honest `GET /api/status` | GPU farm (will not exist) |
+| Draw, mesh, sculpt, BIM walls, grow/linked/loop faces, object + **vertex-slide PE**, lasso/box/circle, knife polyline, **hole fan-fill** | Half-edge vertex PE / Blender-complete knife |
+| GLB, OBJ, STL, ASCII DXF in (walls) + **DXF plan out**, `.3dcore.json`, client ZIP | IFC / USD / DWG / FBX / SKP / USDZ (no real decoder/encoder) |
+| PNG still + WebM + screenshot | Path tracing / Cycles / OIDN |
+| Lights, IBL, SSAO, P2P tiles, exposure + lighting presets | GPU farm |
+| Present mode + quality ladder + **camera objects** | Hosted review links |
+| WebXR VR teleport; AR hit-test + reticle | Native Vision Pro |
+| **Rooms from closed walls, storeys, door/window components, CSV schedule, align-to-floor** | Full BIM IFC |
+| **PWA shell** (same origin, no CDN Three cache) | Native installer |
+| stdlib server + `GET /api/status` | Claiming SUCCESS on empty POSTs |
 
-Implementation status (2026-08-24): Waves **P1–P5**, honest **P6/P7**, plus **client ZIP pack**, **VR teleport**, **AR plane hit-test + reticle**, **lasso/box/circle region select** (objects, or faces in Edit+Face), **knife polyline** (Enter / double-click), **mesh selection grow/linked**, **object proportional translate**, **WebGL lighting/exposure knobs**, and **generic static + /api/status**. No FBX/SKP/USDZ buttons. `src/` demos stay isolated. Vertex PE still needs a half-edge mesh.
+Implementation status (2026-08-24): Honest **v1 complete** of the product flow that this stack can actually run. Remaining items in the right column stay out of the File menu.
 
 ---
 
@@ -225,4 +227,4 @@ Implementation status (2026-08-24): Waves **P1–P5**, honest **P6/P7**, plus **
 
 World-class lightweight ante: **install ledhu, button nijam, output file open avuthundi.** Fake path tracer / 128 GPU / DWG magic **vaddu**.
 
-Implementation status (2026-08-24): Wave **P1 quality ladder** + **P2 Present** + **P3 stills/WebM** + **P4 OBJ/STL** + **P5 WebXR VR (teleport)** + **AR (hit-test place + reticle, or GLB)** + **ASCII DXF walls** + **client ZIP pack** + **lasso/box/circle select** + **knife polyline** + **grow/linked faces** + **object PE** + **WebGL lighting/exposure** + **`GET /api/status`**. USDZ, DWG, SKP, IFC, vertex PE, and path tracing are still out of scope.
+Implementation status (2026-08-24): Honest v1 of the flow is in the browser: Present, stills/WebM, OBJ/STL, WebXR VR+AR, ASCII DXF walls **in and plan DXF out**, client ZIP, lasso/knife, rooms/storeys/door-window **components**, CSV schedule, vertex-slide PE, PWA shell. **Not** USDZ, DWG, SKP, IFC, path tracing, or a GPU farm.

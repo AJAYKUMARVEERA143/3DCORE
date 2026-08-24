@@ -37,7 +37,7 @@ ROADMAP also refers to Playwright scripts that are not in this tree.
 | --- | --- |
 | `web/js/app.js` | All application logic (scene, tools, CSG, sculpt, persist, AI client, P2P, Present mode) |
 | `web/js/render_adapter.js` | Quality ladder (Draft / Balanced / Present) + still supersample math |
-| `web/js/mesh_tools.js` | Face adjacency / grow-linked / falloff / point-in-polygon (no Three.js) |
+| `web/js/bim_kit.js` | Rooms / schedule CSV / plan DXF helpers (no Three.js) |
 | `web/js/format_io.js` | OBJ / STL / ASCII DXF helpers |
 | `web/js/zip_store.js` | Client ZIP pack |
 | `web/index.html` | UI shell |

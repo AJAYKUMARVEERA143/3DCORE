@@ -285,6 +285,17 @@
         return { lines: lines, polylines: polylines };
     }
 
+    function serializeDXF(lines) {
+        var out = ['0', 'SECTION', '2', 'HEADER', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES'];
+        (lines || []).forEach(function (ln) {
+            out.push('0', 'LINE', '8', ln.layer || '0',
+                '10', String(ln.x1), '20', String(ln.y1), '30', '0',
+                '11', String(ln.x2), '21', String(ln.y2), '31', '0');
+        });
+        out.push('0', 'ENDSEC', '0', 'EOF');
+        return out.join('\n');
+    }
+
     var api = {
         parseOBJ: parseOBJ,
         parseOBJ: parseOBJ,
@@ -295,6 +306,7 @@
         serializeSTLAscii: serializeSTLAscii,
         serializeSTLAscii: serializeSTLAscii,
         parseDXF: parseDXF,
+        serializeDXF: serializeDXF,
         isAsciiSTL: isAsciiSTL
     };
 
