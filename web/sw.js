@@ -1,6 +1,6 @@
 /* Offline shell for 3D Core Studio. CDN Three.js is not cached here. */
 const CACHE = '3dcore-shell-v1';
-const SHELL = ['/', '/index.html', '/css/style.css', '/js/app.js', '/js/mesh_tools.js', '/js/bim_kit.js', '/js/format_io.js', '/js/zip_store.js', '/js/render_adapter.js', '/manifest.json'];
+const SHELL = ['/', '/index.html', '/css/style.css', '/js/app.js', '/js/mesh_tools.js', '/js/bim_kit.js', '/js/format_io.js', '/js/zip_store.js', '/js/render_adapter.js', '/manifest.json', '/icons/logo.svg'];
 
 self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL).catch(() => {})));

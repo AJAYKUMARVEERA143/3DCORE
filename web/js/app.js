@@ -386,7 +386,21 @@ function initApp() {
     }
 
     const loadingScreen = document.getElementById('loading-screen');
-    if (loadingScreen) loadingScreen.classList.add('loading-screen-hidden');
+    if (loadingScreen) {
+        // Belt-and-suspenders: the class drives the real fade transition,
+        // but also set pointerEvents directly and immediately so the
+        // loading screen can never keep blocking clicks even if the CSS
+        // transition itself is slow/throttled to tick in some environment
+        // (confirmed to happen under headless test automation — real
+        // browsers tick their compositor on real vsync regardless, but
+        // this costs nothing and removes any doubt). Fully removed from
+        // layout after the transition's real duration so it can't leave
+        // an invisible-but-still-there full-viewport element sitting on
+        // top of everything.
+        loadingScreen.classList.add('loading-screen-hidden');
+        loadingScreen.style.pointerEvents = 'none';
+        setTimeout(() => { loadingScreen.style.display = 'none'; }, 450);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -11411,7 +11425,7 @@ function openHelpDesk() {
 function showAboutDialog() {
     showInfoModal('About 3D Core Studio', `
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
-            <svg viewBox="0 0 64 64" width="48" height="48" style="flex-shrink:0;"><defs><linearGradient id="aboutLogoBg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#5b9bd5"/><stop offset="100%" stop-color="#2f6fdc"/></linearGradient><linearGradient id="aboutLogoGem" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7ee8fa"/><stop offset="55%" stop-color="#4a6fe8"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="16" fill="url(#aboutLogoBg)"/><text x="32" y="43" font-family="Arial,sans-serif" font-weight="900" font-size="28" fill="#e8edf5" text-anchor="middle">3D</text><polygon points="32,17 43,23.5 43,36.5 32,43 21,36.5 21,23.5" fill="url(#aboutLogoGem)" stroke="#fff" stroke-width="1" opacity="0.92"/><polygon points="32,17 43,23.5 32,30 21,23.5" fill="#a5f3fc" opacity="0.55"/></svg>
+            <svg viewBox="0 0 64 64" width="48" height="48" style="flex-shrink:0;"><circle cx="56.00" cy="32.00" r="4.50" fill="#f94545" opacity="0.9"/><circle cx="55.14" cy="35.62" r="4.91" fill="#f6592a" opacity="0.9"/><circle cx="52.84" cy="38.44" r="5.18" fill="#eb7a1e" opacity="0.9"/><circle cx="49.73" cy="40.05" r="5.32" fill="#df9a26" opacity="0.9"/><circle cx="46.43" cy="40.48" r="5.33" fill="#d4b13b" opacity="0.9"/><circle cx="43.31" cy="40.00" r="5.66" fill="#d1c150" opacity="0.9"/><circle cx="40.53" cy="38.90" r="6.08" fill="#d4cf5b" opacity="0.9"/><circle cx="38.07" cy="37.41" r="6.33" fill="#dcdf56" opacity="0.9"/><circle cx="35.89" cy="35.70" r="6.37" fill="#dbeb42" opacity="0.9"/><circle cx="33.90" cy="33.88" r="6.20" fill="#cff62a" opacity="0.9"/><circle cx="32.00" cy="32.00" r="5.82" fill="#b4f920" opacity="0.9"/><circle cx="30.10" cy="30.12" r="5.25" fill="#92f62a" opacity="0.9"/><circle cx="28.11" cy="28.30" r="4.55" fill="#75eb42" opacity="0.9"/><circle cx="25.93" cy="26.59" r="3.77" fill="#60df56" opacity="0.9"/><circle cx="23.47" cy="25.10" r="4.22" fill="#5bd46e" opacity="0.9"/><circle cx="20.69" cy="24.00" r="4.95" fill="#50d181" opacity="0.9"/><circle cx="17.57" cy="23.52" r="5.56" fill="#3bd493" opacity="0.9"/><circle cx="14.27" cy="23.95" r="6.01" fill="#26dfad" opacity="0.9"/><circle cx="11.16" cy="25.56" r="6.26" fill="#1eebcc" opacity="0.9"/><circle cx="8.86" cy="28.38" r="6.30" fill="#2af6e8" opacity="0.9"/><circle cx="8.00" cy="32.00" r="6.13" fill="#45f9f9" opacity="0.9"/><circle cx="8.86" cy="35.62" r="5.78" fill="#5eebf6" opacity="0.9"/><circle cx="11.16" cy="38.44" r="5.47" fill="#65d7eb" opacity="0.9"/><circle cx="14.27" cy="40.05" r="5.52" fill="#56b9df" opacity="0.9"/><circle cx="17.57" cy="40.48" r="5.43" fill="#3b93d4" opacity="0.9"/><circle cx="20.69" cy="40.00" r="5.20" fill="#2465d1" opacity="0.9"/><circle cx="23.47" cy="38.90" r="4.81" fill="#1b38d4" opacity="0.9"/><circle cx="25.93" cy="37.41" r="4.61" fill="#3526df" opacity="0.9"/><circle cx="28.11" cy="35.70" r="4.91" fill="#7542eb" opacity="0.9"/><circle cx="30.10" cy="33.88" r="5.09" fill="#ac5ef6" opacity="0.9"/><circle cx="32.00" cy="32.00" r="5.16" fill="#cc6bf9" opacity="0.9"/><circle cx="33.90" cy="30.12" r="5.49" fill="#d95ef6" opacity="0.9"/><circle cx="35.89" cy="28.30" r="5.98" fill="#db42eb" opacity="0.9"/><circle cx="38.07" cy="26.59" r="6.31" fill="#db26df" opacity="0.9"/><circle cx="40.53" cy="25.10" r="6.44" fill="#d41bcc" opacity="0.9"/><circle cx="43.31" cy="24.00" r="6.34" fill="#d124bb" opacity="0.9"/><circle cx="46.43" cy="23.52" r="6.03" fill="#d43bb1" opacity="0.9"/><circle cx="49.73" cy="23.95" r="5.53" fill="#df56ac" opacity="0.9"/><circle cx="52.84" cy="25.56" r="4.87" fill="#eb65a1" opacity="0.9"/><circle cx="55.14" cy="28.38" r="4.11" fill="#f65e81" opacity="0.9"/></svg>
             <div>
                 <div style="font-size:16px; font-weight:800; letter-spacing:0.5px;"><span style="color:#9aa5b1;">3D</span><span style="color:#4a90e2;">CORE</span></div>
                 <div style="font-size:9px; letter-spacing:1.5px; color:var(--b-text-muted);">INNOVATION · CREATIVITY · TECHNOLOGY</div>

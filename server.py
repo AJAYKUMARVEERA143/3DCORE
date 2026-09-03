@@ -32,7 +32,7 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 # Browser client files under web/js and web/css. New modules (zip_store, mesh_tools)
 # must be served without adding a one-off elif per filename.
-_WEB_STATIC_PREFIXES = ("/js/", "/css/", "/manifest.json", "/sw.js")
+_WEB_STATIC_PREFIXES = ("/js/", "/css/", "/icons/", "/manifest.json", "/sw.js")
 _WEB_MIME = {
     ".js": "application/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
