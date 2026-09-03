@@ -384,6 +384,9 @@ function initApp() {
         renderer.domElement.addEventListener('pointerdown', markSceneDirty);
         renderer.domElement.addEventListener('wheel', markSceneDirty, { passive: true });
     }
+
+    const loadingScreen = document.getElementById('loading-screen');
+    if (loadingScreen) loadingScreen.classList.add('loading-screen-hidden');
 }
 
 // ─────────────────────────────────────────────────────────────

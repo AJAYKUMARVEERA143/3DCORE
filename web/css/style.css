@@ -1220,3 +1220,24 @@ body.present-mode .blender-main-stage { height: 100vh; }
   .viewport-hud-text { top: 8px; left: 50px; }
   .sketchup-measurement-vcb-box { bottom: 8px; right: 8px; }
 }
+
+/* LOADING SCREEN — shown instantly (first thing in <body>, before any CDN
+   script has even downloaded) and hidden once window.onload (initApp)
+   finishes. Each logo circle pulses in on its own staggered delay (set
+   inline per-shape in index.html) so the mark visibly "draws itself" —
+   a real CSS animation standing in for an actual GIF, since the app has
+   no video/GIF asset pipeline and this scales/looks crisp at any size. */
+#loading-screen {
+  position: fixed; inset: 0; z-index: 99999;
+  background: #141414;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+#loading-screen.loading-screen-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+#loading-screen .loading-pulse { transform-box: fill-box; transform-origin: center; animation: loading-pulse-kf 1.8s ease-in-out infinite; }
+#loading-screen-title { color: #ddd; font-family: 'Inter', Arial, sans-serif; font-size: 14px; letter-spacing: 1px; opacity: 0.85; }
+@keyframes loading-pulse-kf {
+  0%, 100% { opacity: 0.55; transform: scale(0.88); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
