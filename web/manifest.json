@@ -7,6 +7,6 @@
   "theme_color": "#2f6fdc",
   "description": "Browser CAD / 3D editor. WebGL PBR, not a path tracer.",
   "icons": [
-    { "src": "/icons/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "/icons/logo.png", "sizes": "2000x2000", "type": "image/png", "purpose": "any" }
   ]
 }
