@@ -344,6 +344,7 @@ function initApp() {
     setupBoxCircleSelect(canvas);
     setupContextMenu(canvas);
     setupBooleanPicker(canvas);
+    setupDimensionPicker(canvas);
     setupOpeningTool(canvas);
     setupScaleHandles(canvas);
     setupMaterialDragDrop(canvas);
@@ -431,6 +432,7 @@ function renderTick(fromXR) {
     renderViewCube();
     syncSectionPlane(); // real-time — clip plane follows the gizmo mesh if the user moved/rotated it
     stepWalkMovement(dt);
+    updateAllPersistentDimensions();
 
     if (isAnimPlaying) {
         animFrame = (animFrame % 250) + 1;
@@ -1634,6 +1636,112 @@ function rescaleEntireModel(ratio) {
         undo() { before.forEach(({ entry, pos, scale }) => { entry.mesh.position.copy(pos); entry.mesh.scale.copy(scale); }); },
         redo() { apply(); },
     });
+}
+
+// ─────────────────────────────────────────────────────────────
+// DIMENSION ANNOTATIONS — a real, PERSISTENT linear dimension between two
+// objects, unlike Tape Measure above (a one-shot decorative Line frozen at
+// the moment it was drawn). Click two objects; the dimension keeps
+// tracking their live .position every frame and its line/label update in
+// real time as either object moves — the actual gap this app's ROADMAP
+// called out as still open. Deliberately scoped to object-to-object (not
+// arbitrary moving mesh vertices, which Tape Measure already covers for a
+// one-shot on-surface reading) — unambiguous to track, and the common
+// real use case (how far apart are these two things).
+// ─────────────────────────────────────────────────────────────
+let persistentDimensions = []; // { objA, objB, group, _lastDist }
+let _dimensionFirstObj = null;
+
+function setupDimensionPicker(canvas) {
+    canvas.addEventListener('pointerup', e => {
+        if (activeTool !== 'dimension' || e.button !== 0) return;
+        const rect = canvas.getBoundingClientRect();
+        _mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        _mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        _raycaster.setFromCamera(_mouse, camera);
+        const targets = sceneObjects.filter(o => o.mesh && o.type !== 'camera' && o.type !== 'light' && o.type !== 'dimension').map(o => o.mesh);
+        const hits = _raycaster.intersectObjects(targets, true);
+        if (hits.length === 0) return;
+        let obj = hits[0].object;
+        while (obj && !sceneObjects.some(o => o.mesh === obj)) obj = obj.parent;
+        if (!obj) return;
+
+        if (!_dimensionFirstObj) {
+            _dimensionFirstObj = obj;
+            setVCB('Dimension:', `${obj.name} — click a second object`);
+            return;
+        }
+        if (obj === _dimensionFirstObj) { setVCB('Dimension:', 'Pick a different second object'); return; }
+        createPersistentDimension(_dimensionFirstObj, obj);
+        _dimensionFirstObj = null;
+    });
+}
+
+function createPersistentDimension(objA, objB) {
+    const group = new THREE.Group();
+    group.name = nextName('Dimension');
+    scene.add(group);
+    const dim = { objA, objB, group };
+    persistentDimensions.push(dim);
+    sceneObjects.push({ name: group.name, type: 'dimension', mesh: group, level: activeLevelIndex });
+    renderOutliner();
+    updateDimensionGroup(dim);
+    setVCB('Dimension:', `${objA.name} ↔ ${objB.name}`);
+    pushUndo({
+        undo() { removeSceneObject(group); persistentDimensions = persistentDimensions.filter(d => d !== dim); },
+        redo() { scene.add(group); sceneObjects.push({ name: group.name, type: 'dimension', mesh: group, level: activeLevelIndex }); persistentDimensions.push(dim); renderOutliner(); },
+    });
+}
+
+// Rebuilds a dimension's line + arrow/tick + text-sprite children from its
+// two live object positions. Full rebuild rather than mutating existing
+// geometry in place — createDimensionSprite/addDimensionDecorations (built
+// for Tape Measure) already do real work per call and rebuilding is simple
+// and correct; a dimension only rebuilds on an actual distance change
+// (see updateAllPersistentDimensions), not unconditionally every frame.
+function updateDimensionGroup(dim) {
+    while (dim.group.children.length) {
+        const c = dim.group.children.pop();
+        if (c.geometry) c.geometry.dispose();
+        if (c.material) { if (c.material.map) c.material.map.dispose(); c.material.dispose(); }
+    }
+    const p0 = dim.objA.position.clone();
+    const p1 = dim.objB.position.clone();
+    const dist = p0.distanceTo(p1);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p0, p1]), new THREE.LineDashedMaterial({ color: 0xffcc00, dashSize: 0.15, gapSize: 0.08 }));
+    line.computeLineDistances();
+    dim.group.add(line);
+    addDimensionDecorations(dim.group, p0, p1, formatLength(dist, 3));
+    dim._lastDist = dist;
+}
+
+// Called every frame from the render loop — cheap: skips any dimension
+// whose distance hasn't actually changed, and drops (with its scene
+// object) any dimension whose linked object was deleted, instead of
+// throwing trying to read position off something gone.
+function updateAllPersistentDimensions() {
+    if (!persistentDimensions.length) return;
+    let changed = false;
+    persistentDimensions.slice().forEach(dim => {
+        // Drop this dimension if either linked object is gone, OR if the
+        // dimension's own scene object was deleted directly (e.g. via
+        // normal Delete on the dimension itself) — either way there's
+        // nothing live left to keep updating.
+        if (!sceneObjects.some(o => o.mesh === dim.group) ||
+            !sceneObjects.some(o => o.mesh === dim.objA) ||
+            !sceneObjects.some(o => o.mesh === dim.objB)) {
+            removeSceneObject(dim.group);
+            persistentDimensions = persistentDimensions.filter(d => d !== dim);
+            changed = true;
+            return;
+        }
+        const newDist = dim.objA.position.distanceTo(dim.objB.position);
+        if (dim._lastDist === undefined || Math.abs(newDist - dim._lastDist) > 1e-6) {
+            updateDimensionGroup(dim);
+            changed = true;
+        }
+    });
+    if (changed) markSceneDirty();
 }
 
 // --- Poly Build: click points to build a new fan-triangulated face (min 3), double-click/Enter to finish ---
@@ -3308,7 +3416,7 @@ const TOOL_CURSORS = {
     poly_build: 'crosshair',
     pushpull: svgCursor(PUSHPULL_CURSOR_GLYPH, 12, 'ns-resize'),
     offset: svgCursor(OFFSET_CURSOR_GLYPH, 12, 'ns-resize'),
-    tape: 'crosshair', knife: 'crosshair', bisect: 'crosshair',
+    tape: 'crosshair', knife: 'crosshair', bisect: 'crosshair', dimension: 'crosshair',
     vertex_slide: 'ew-resize', edge_slide: 'ew-resize', extrude_to_cursor: 'crosshair', eyedropper: 'crosshair',
     extrude_normals: 'ns-resize', extrude_individual: 'ns-resize', bevel: 'ns-resize', shrink_fatten: 'ns-resize', to_sphere: 'ns-resize',
 };
@@ -9084,6 +9192,8 @@ function toggleLockSelected() {
 function newScene() {
     buildDefaultBlenderScene();
     keyframes = {};
+    persistentDimensions = [];
+    _dimensionFirstObj = null;
     undoStack.length = 0;
     redoStack.length = 0;
     // sectionPlaneMesh/renderer.clippingPlanes live outside sceneObjects (so
@@ -9181,6 +9291,18 @@ function sceneToJSON() {
         // frame (scripted flows, AI Assistant tool calls) would otherwise
         // serialize a stale/identity matrix instead of the live position.
         objects: sceneObjects.map(o => {
+            if (o.type === 'dimension') {
+                // Deliberately NOT o.mesh.toJSON(): a dimension group's
+                // children include a Sprite with a CanvasTexture material,
+                // which doesn't round-trip cleanly through THREE.ObjectLoader
+                // in r128 (silently fails to parse and gets dropped). The
+                // children are pure runtime decoration, fully rebuilt by
+                // updateDimensionGroup() right after load anyway — so skip
+                // serializing them and just save enough to reconstruct the
+                // link on load.
+                const dim = persistentDimensions.find(d => d.group === o.mesh);
+                return { appType: 'dimension', appName: o.name, appLevel: o.level, appDimRefs: dim ? [dim.objA.name, dim.objB.name] : null };
+            }
             o.mesh.updateMatrix();
             return { appType: o.type, appName: o.name, appLevel: o.level, object: o.mesh.toJSON() };
         }),
@@ -9206,6 +9328,8 @@ function loadSceneFromJSON(data) {
 
     sceneObjects.forEach(o => scene.remove(o.mesh));
     sceneObjects = [];
+    persistentDimensions = []; // stale refs would otherwise point at meshes this reload just removed
+    _dimensionFirstObj = null;
     transformControls.detach();
     selectedObject = null;
     sectionPlaneMesh = null; // see newScene()'s identical reset for why this can't be left dangling
@@ -9215,8 +9339,16 @@ function loadSceneFromJSON(data) {
 
     const loader = new THREE.ObjectLoader();
     const uuidRemap = {}; // old uuid (from file) -> live object, for keyframe rehydration
+    const dimEntries = []; // {name, refs: [nameA, nameB]} -- resolved into real dimension groups once every other object exists
 
     (data.objects || []).forEach(entry => {
+        // Dimensions are never round-tripped through the object JSON at
+        // all (see sceneToJSON) — just queue the link and build a real
+        // group for it below, once every other object has loaded.
+        if (entry.appType === 'dimension') {
+            if (Array.isArray(entry.appDimRefs)) dimEntries.push({ name: entry.appName, refs: entry.appDimRefs });
+            return;
+        }
         let obj;
         try {
             obj = loader.parse(entry.object);
@@ -9231,6 +9363,21 @@ function loadSceneFromJSON(data) {
         if (entry.object && entry.object.object && entry.object.object.uuid) {
             uuidRemap[entry.object.object.uuid] = obj;
         }
+    });
+
+    // Re-link each dimension to its two live objects (found by name) and
+    // build a fresh group + line/label from their real current positions.
+    dimEntries.forEach(({ name, refs }) => {
+        const objA = sceneObjects.find(o => o.name === refs[0]);
+        const objB = sceneObjects.find(o => o.name === refs[1]);
+        if (!objA || !objB) return; // referenced object no longer exists in this file
+        const group = new THREE.Group();
+        group.name = name || nextName('Dimension');
+        scene.add(group);
+        sceneObjects.push({ name: group.name, type: 'dimension', mesh: group, level: 0 });
+        const dim = { objA: objA.mesh, objB: objB.mesh, group };
+        persistentDimensions.push(dim);
+        updateDimensionGroup(dim);
     });
 
     keyframes = {};
