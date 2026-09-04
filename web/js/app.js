@@ -455,6 +455,7 @@ function initApp() {
     renderLevelsPanel();
 
     window.addEventListener('resize', fitCanvas);
+    window.addEventListener('resize', repositionToolSettingsPanel);
     renderLoop();
 
     initDockablePanels();
@@ -4120,6 +4121,77 @@ function updateCanvasCursor() {
 // the toolbar the moment that tool is selected — was previously buried in
 // menus, if it existed at all.
 const TOOL_SETTINGS_SECTIONS = { wall: 'tool-settings-wall', slab: 'tool-settings-slab', opening: 'tool-settings-opening', freehand3d: 'tool-settings-freehand3d' };
+
+// ─────────────────────────────────────────────────────────────
+// TOOL SETTINGS PANEL POSITIONING — dock-aware. The first version of this
+// only measured the Tools palette + HUD text rects, which worked for the
+// one default layout it was built against but not once a panel gets
+// dragged elsewhere: dock any real panel (Tools palette, Outliner &
+// Properties, AI chat — see initDockablePanels()) to a different edge, or
+// float one over the canvas, and the old fixed two-rect math had no idea
+// it needed to avoid the new position. This measures every CURRENTLY
+// relevant obstacle (whichever dock rails are non-empty, any floating
+// panel, the Tools palette, the HUD text) fresh each time and picks the
+// first clear spot — correct for any arrangement the user has actually
+// dragged things into, not just the default one.
+// ─────────────────────────────────────────────────────────────
+function collectPanelObstacleRects(excludeId) {
+    const rects = [];
+    const consider = el => {
+        if (!el || el.id === excludeId) return;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) rects.push(r);
+    };
+    consider(document.getElementById('su-toolbar'));
+    consider(document.querySelector('.viewport-hud-text'));
+    ['dock-left', 'dock-right', 'dock-top', 'dock-bottom'].forEach(id => {
+        const rail = document.getElementById(id);
+        if (rail && rail.children.length) consider(rail);
+    });
+    document.querySelectorAll('.dockable-panel.floating').forEach(consider);
+    return rects;
+}
+
+function rectOverlapsBox(r, left, top, w, h) {
+    return !(left + w <= r.left || left >= r.right || top + h <= r.top || top >= r.bottom);
+}
+
+// Tries: the original default corner, then just past each obstacle's
+// right edge (top-aligned) and just past each obstacle's bottom edge
+// (left-aligned) — real candidate spots for a small contextual popup next
+// to whatever's currently occupying the layout — and returns the first
+// one that's actually clear of every obstacle and fits on screen. Falls
+// back to the default corner (least-bad option) if nothing is fully clear.
+function findClearPanelSpot(w, h, excludeId) {
+    const obstacles = collectPanelObstacleRects(excludeId);
+    const candidates = [{ left: 56, top: 12 }];
+    obstacles.forEach(o => {
+        candidates.push({ left: o.right + 8, top: 12 });
+        candidates.push({ left: 12, top: o.bottom + 8 });
+    });
+    for (const c of candidates) {
+        if (c.left < 0 || c.top < 0 || c.left + w > window.innerWidth || c.top + h > window.innerHeight) continue;
+        if (obstacles.every(o => !rectOverlapsBox(o, c.left, c.top, w, h))) return c;
+    }
+    return candidates[0];
+}
+
+// Re-measures and repositions — called not just from updateToolSettingsPanel()
+// on tool switch, but also whenever any panel's dock/float state actually
+// changes (see dockPanel()/floatPanel()/addResizeHandle() below) and on
+// window resize, so the popup stays clear even if the user rearranges
+// panels WHILE it's already open.
+function repositionToolSettingsPanel() {
+    const panel = document.getElementById('tool-settings-panel');
+    if (!panel || panel.style.display === 'none') return;
+    const w = panel.offsetWidth || 170, h = panel.offsetHeight || 120;
+    const spot = findClearPanelSpot(w, h, 'tool-settings-panel');
+    panel.style.left = spot.left + 'px';
+    panel.style.top = spot.top + 'px';
+}
+
 function updateToolSettingsPanel(tool) {
     const panel = document.getElementById('tool-settings-panel');
     const sectionId = TOOL_SETTINGS_SECTIONS[tool];
@@ -4133,23 +4205,8 @@ function updateToolSettingsPanel(tool) {
         const titleEl = document.getElementById('tool-settings-title');
         if (titleEl) titleEl.innerText = titles[tool];
         if (tool === 'opening') refreshOpeningPresetDropdown();
-        // Anchored to the ACTUAL current rects of the Tools palette and
-        // the viewport HUD text (not a hardcoded pixel offset) — the Tools
-        // palette floats on top of the canvas (the canvas is full-bleed
-        // underneath it, so its own rect gives no clearance info) and is
-        // itself dockable/floatable, so a fixed left:56px only ever
-        // happened to clear it in one specific layout. Measuring both
-        // real rects and placing this panel clear of whichever extends
-        // further keeps it out of the way regardless of current layout.
-        const toolsPalette = document.getElementById('su-toolbar');
-        const hud = document.querySelector('.viewport-hud-text');
-        const toolsRect = toolsPalette ? toolsPalette.getBoundingClientRect() : null;
-        const hudRect = hud ? hud.getBoundingClientRect() : null;
-        const left = toolsRect ? Math.max(toolsRect.right + 8, 56) : 56;
-        const top = hudRect ? Math.max(hudRect.bottom + 8, 12) : 12;
-        panel.style.left = left + 'px';
-        panel.style.top = top + 'px';
         panel.style.display = 'block';
+        repositionToolSettingsPanel();
     } else {
         panel.style.display = 'none';
     }
@@ -11891,6 +11948,7 @@ function addResizeHandle(panel) {
         else if (zone === 'left') panel.style.width = Math.max(180, startW + (e.clientX - startX)) + 'px';
         else if (zone === 'bottom') panel.style.height = Math.max(32, startH - (e.clientY - startY)) + 'px';
         else if (zone === 'top') panel.style.height = Math.max(32, startH + (e.clientY - startY)) + 'px';
+        repositionToolSettingsPanel(); // keep clear live while resizing, not just after release
     });
     const finish = () => {
         if (!dragging) return;
@@ -11925,6 +11983,7 @@ function makePanelDraggable(panel, header) {
         const dx = e.clientX - startX, dy = e.clientY - startY;
         panel.style.left = Math.max(0, startLeft + dx) + 'px';
         panel.style.top = Math.max(0, startTop + dy) + 'px';
+        repositionToolSettingsPanel(); // keep clear live while dragging, not just after drop
     });
 
     const finishDrag = e => {
@@ -12003,6 +12062,11 @@ function saveDockLayout() {
         }
     });
     try { localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify(state)); } catch (err) { /* storage unavailable — layout just won't persist */ }
+    // Every real dock/float/resize action (panel drag, resize-handle drag)
+    // ends here — the single point where any panel's rect may have just
+    // changed, so it's also the right place to re-clear the tool-settings
+    // popup if it's currently open (see repositionToolSettingsPanel()).
+    repositionToolSettingsPanel();
 }
 
 function restoreDockLayout() {
