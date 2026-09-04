@@ -8999,6 +8999,71 @@ function runMergeByDistance() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// MARK SHARP (Blender: Edge menu > Mark Sharp) — flags the currently
+// Edge-Selected edge as a hard crease. Stored as a Set of position-key
+// pairs on mesh.userData.sharpEdges rather than by buffer index, since
+// non-indexed geometry duplicates every vertex per-triangle and indices
+// shift across edits — the two endpoint *positions* are what's stable.
+// Session-only (like the existing `locked` flag — see sceneToJSON),
+// not round-tripped through Save/Load.
+//
+// A sharp mark only changes anything visually once Shade Smooth runs:
+// it tells the normal-averaging pass in shadeSmooth() below to treat
+// that edge as a seam (its two sides keep independent, un-averaged
+// normals) instead of blending across it like every other shared edge.
+// ─────────────────────────────────────────────────────────────
+function edgeKeyOf(mesh, i, j) {
+    const pos = mesh.geometry.attributes.position;
+    const a = positionKey(pos, i), b = positionKey(pos, j);
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+function parsePositionKey(key) {
+    return key.split(',').map(Number);
+}
+
+function rebuildSharpEdgeOverlay(mesh) {
+    if (mesh.userData._sharpOverlay) {
+        mesh.remove(mesh.userData._sharpOverlay);
+        mesh.userData._sharpOverlay.geometry.dispose();
+        mesh.userData._sharpOverlay.material.dispose();
+        mesh.userData._sharpOverlay = null;
+    }
+    const sharp = mesh.userData.sharpEdges;
+    if (!sharp || sharp.size === 0) return;
+    const pts = [];
+    sharp.forEach(key => {
+        const [ka, kb] = key.split('|');
+        const [ax, ay, az] = parsePositionKey(ka);
+        const [bx, by, bz] = parsePositionKey(kb);
+        pts.push(new THREE.Vector3(ax, ay, az), new THREE.Vector3(bx, by, bz));
+    });
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: 0x00e5ff, linewidth: 2, depthTest: false });
+    const overlay = new THREE.LineSegments(geo, mat);
+    overlay.renderOrder = 998;
+    mesh.userData._sharpOverlay = overlay;
+    mesh.add(overlay);
+}
+
+function toggleMarkSharp() {
+    const mesh = selectedObject;
+    if (!mesh || !mesh.isMesh || !edgeSelectOn || !selectedEdgeGroups) {
+        setVCB('Mark Sharp:', 'Edge Select an edge first');
+        return;
+    }
+    ensureNonIndexed(mesh);
+    const key = edgeKeyOf(mesh, selectedEdgeGroups.a[0], selectedEdgeGroups.b[0]);
+    if (!mesh.userData.sharpEdges) mesh.userData.sharpEdges = new Set();
+    const sharp = mesh.userData.sharpEdges;
+    const wasSharp = sharp.has(key);
+    const apply = on => { if (on) sharp.add(key); else sharp.delete(key); rebuildSharpEdgeOverlay(mesh); };
+    apply(!wasSharp);
+    pushUndo({ undo() { apply(wasSharp); }, redo() { apply(!wasSharp); } });
+    setVCB('Mark Sharp:', !wasSharp ? 'On (Shade Smooth will keep it a hard edge)' : 'Off');
+}
+
+// ─────────────────────────────────────────────────────────────
 // SHADE SMOOTH / SHADE FLAT — a real, explicit action in Blender too
 // (not something that survives topology edits automatically there
 // either). Matters here because ensureNonIndexed() duplicates every
@@ -9006,7 +9071,10 @@ function runMergeByDistance() {
 // computeVertexNormals() afterward makes even originally-smooth
 // primitives (UV Sphere, Cylinder, Cone) look faceted everywhere, not
 // just at the edited area. Shade Smooth re-averages normals across every
-// group of vertices that still share a world position.
+// group of vertices that still share a world position — UNLESS a Mark
+// Sharp edge separates them, in which case that edge stays a hard
+// crease (Blender's real semantics: sharp marks only matter at
+// normal-computation time, same mechanism as Shade Smooth itself).
 // ─────────────────────────────────────────────────────────────
 function shadeSmooth() {
     const obj = selectedObject;
@@ -9017,7 +9085,49 @@ function shadeSmooth() {
     const geo = obj.geometry;
     geo.computeVertexNormals();
     const norm = geo.attributes.normal;
-    const groups = buildPositionGroups(obj);
+    const pos = geo.attributes.position;
+    const sharp = obj.userData.sharpEdges;
+
+    let groups;
+    if (sharp && sharp.size > 0) {
+        // Union-Find over position-array indices: union the matching
+        // corners across every triangle-shared edge EXCEPT ones marked
+        // sharp, so a hard edge never gets unioned into the same
+        // normal-averaging group even though its two sides still share
+        // a world position. Same union-find pattern as mergeByDistance().
+        const n = pos.count;
+        const parent = Array.from({ length: n }, (_, i) => i);
+        const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+        const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+
+        const edgeOccurrences = new Map(); // edgeKey -> [[i,j], ...]
+        for (let t = 0; t < n; t += 3) {
+            const tri = [t, t + 1, t + 2];
+            for (let e = 0; e < 3; e++) {
+                const i = tri[e], j = tri[(e + 1) % 3];
+                const key = edgeKeyOf(obj, i, j);
+                if (!edgeOccurrences.has(key)) edgeOccurrences.set(key, []);
+                edgeOccurrences.get(key).push([i, j]);
+            }
+        }
+        edgeOccurrences.forEach((occurrences, key) => {
+            if (sharp.has(key) || occurrences.length < 2) return;
+            const [i1, j1] = occurrences[0];
+            const [i2, j2] = occurrences[1];
+            if (positionKey(pos, i1) === positionKey(pos, i2)) { union(i1, i2); union(j1, j2); }
+            else { union(i1, j2); union(j1, i2); }
+        });
+
+        groups = new Map();
+        for (let i = 0; i < n; i++) {
+            const r = find(i);
+            if (!groups.has(r)) groups.set(r, []);
+            groups.get(r).push(i);
+        }
+    } else {
+        groups = buildPositionGroups(obj);
+    }
+
     groups.forEach(indices => {
         if (indices.length < 2) return;
         const avg = new THREE.Vector3();
@@ -9187,6 +9297,114 @@ function toggleLockSelected() {
         undo() { entry.locked = !entry.locked; renderOutliner(); if (selectedObject === mesh) selectObject(mesh); },
         redo() { entry.locked = !entry.locked; renderOutliner(); if (selectedObject === mesh) selectObject(mesh); },
     });
+}
+
+// ─────────────────────────────────────────────────────────────
+// APPLY TRANSFORM (Blender: Object > Apply > Location/Rotation/Scale,
+// Ctrl+A — object_transform.cc, apply_objects_internal()) — bakes the
+// object's current position/rotation/scale directly into its own mesh
+// geometry, then resets those three fields to identity. Real value: any
+// tool that reads raw vertex positions (export, a boolean op, a future
+// snap-to-geometry) currently has to account for a possibly-nonzero
+// transform on top of them; Apply Transform removes that indirection.
+// A mirrored (negative-determinant) scale flips triangle winding when
+// baked in, so normals are recomputed/re-flipped to match, exactly like
+// Blender's corrective-flip option.
+// ─────────────────────────────────────────────────────────────
+function applyTransform(mesh, opts) {
+    opts = opts || { loc: true, rot: true, scale: true };
+    const pos = opts.loc ? mesh.position.clone() : new THREE.Vector3();
+    const quat = opts.rot ? mesh.quaternion.clone() : new THREE.Quaternion();
+    const scl = opts.scale ? mesh.scale.clone() : new THREE.Vector3(1, 1, 1);
+    const m = new THREE.Matrix4().compose(pos, quat, scl);
+
+    ensureNonIndexed(mesh);
+    mesh.geometry.applyMatrix4(m);
+    if (m.determinant() < 0) flipNormals(mesh);
+    else mesh.geometry.computeVertexNormals();
+
+    if (opts.loc) mesh.position.set(0, 0, 0);
+    if (opts.rot) mesh.quaternion.identity();
+    if (opts.scale) mesh.scale.set(1, 1, 1);
+    mesh.updateMatrix();
+}
+
+function applyTransformToSelected(opts) {
+    const mesh = selectedObject;
+    if (!mesh || !mesh.isMesh) { setVCB('Apply Transform:', 'Select a mesh object first'); return; }
+    const entry = sceneObjects.find(o => o.mesh === mesh);
+    if (entry && entry.locked) { setVCB('Apply Transform:', 'Object is locked'); return; }
+
+    ensureNonIndexed(mesh);
+    const beforeGeo = deepCloneGeometry(mesh.geometry);
+    const beforePos = mesh.position.clone(), beforeQuat = mesh.quaternion.clone(), beforeScale = mesh.scale.clone();
+
+    applyTransform(mesh, opts);
+
+    const afterGeo = deepCloneGeometry(mesh.geometry);
+    const afterPos = mesh.position.clone(), afterQuat = mesh.quaternion.clone(), afterScale = mesh.scale.clone();
+
+    pushUndo({
+        undo() {
+            mesh.geometry.dispose(); mesh.geometry = beforeGeo;
+            mesh.position.copy(beforePos); mesh.quaternion.copy(beforeQuat); mesh.scale.copy(beforeScale);
+            if (selectedObject === mesh) updateInspectorFromSelected();
+        },
+        redo() {
+            mesh.geometry.dispose(); mesh.geometry = afterGeo;
+            mesh.position.copy(afterPos); mesh.quaternion.copy(afterQuat); mesh.scale.copy(afterScale);
+            if (selectedObject === mesh) updateInspectorFromSelected();
+        },
+    });
+    updateInspectorFromSelected();
+    const labels = [opts.loc && 'Location', opts.rot && 'Rotation', opts.scale && 'Scale'].filter(Boolean);
+    setVCB('Apply:', labels.join(' + ') || 'Nothing to apply');
+}
+
+// ─────────────────────────────────────────────────────────────
+// SET ORIGIN → GEOMETRY (Blender: Object > Set Origin > Origin to
+// Geometry — object_transform.cc, object_origin_set_exec(),
+// ORIGIN_TO_GEOMETRY) — moves the object's pivot to the center of its
+// own geometry WITHOUT moving it visually: every vertex shifts by
+// -center (so the mesh re-centers around the new local origin), and
+// that same offset (rotated/scaled into world space) is added to the
+// object's world position so nothing appears to jump. Genuinely useful
+// before Rotate/Scale on an object whose pivot sits at one corner
+// (e.g. a primitive that was never re-centered) — real "grab from the
+// middle" behavior only works once the origin is actually in the middle.
+// ─────────────────────────────────────────────────────────────
+function setOriginToGeometry() {
+    const mesh = selectedObject;
+    if (!mesh || !mesh.isMesh) { setVCB('Set Origin:', 'Select a mesh object first'); return; }
+    const entry = sceneObjects.find(o => o.mesh === mesh);
+    if (entry && entry.locked) { setVCB('Set Origin:', 'Object is locked'); return; }
+
+    ensureNonIndexed(mesh);
+    const beforeGeo = deepCloneGeometry(mesh.geometry);
+    const beforePos = mesh.position.clone();
+
+    const pos = mesh.geometry.attributes.position;
+    const center = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) center.add(new THREE.Vector3().fromBufferAttribute(pos, i));
+    center.divideScalar(pos.count);
+    if (center.lengthSq() < 1e-12) { beforeGeo.dispose(); setVCB('Set Origin:', 'Origin already at geometry center'); return; }
+
+    mesh.geometry.translate(-center.x, -center.y, -center.z);
+    // R*(S*center): the same local offset expressed in world space, so
+    // adding it to the current world position keeps every vertex's world
+    // location unchanged even though the local origin just moved.
+    const worldOffset = center.clone().multiply(mesh.scale).applyQuaternion(mesh.quaternion);
+    mesh.position.add(worldOffset);
+    mesh.updateMatrix();
+
+    const afterGeo = deepCloneGeometry(mesh.geometry);
+    const afterPos = mesh.position.clone();
+    pushUndo({
+        undo() { mesh.geometry.dispose(); mesh.geometry = beforeGeo; mesh.position.copy(beforePos); if (selectedObject === mesh) updateInspectorFromSelected(); },
+        redo() { mesh.geometry.dispose(); mesh.geometry = afterGeo; mesh.position.copy(afterPos); if (selectedObject === mesh) updateInspectorFromSelected(); },
+    });
+    updateInspectorFromSelected();
+    setVCB('Set Origin:', 'Origin to Geometry');
 }
 
 function newScene() {

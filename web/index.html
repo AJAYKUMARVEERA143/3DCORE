@@ -629,6 +629,7 @@
               <button class="transport-btn" onclick="shadeFlat()" title="Shade Flat">Shade Flat</button>
               <button class="transport-btn" onclick="runRecalculateNormals()" title="Recalculate Normals Outside (Alt+N)">Recalc Normals (Outside)</button>
               <button class="transport-btn" onclick="runFlipNormals()" title="Flip Normals — selected face(s), or whole mesh if none selected">Flip Normals</button>
+              <button class="transport-btn" onclick="toggleMarkSharp()" title="Edge Select an edge (pill above), then click this — a hard crease that Shade Smooth will respect">Mark Sharp</button>
               <button class="transport-btn" style="grid-column: span 2;" onclick="toggleFaceOrientation()" title="Toggle Face Orientation overlay — blue=outward, red=inward/flipped">Toggle Face Orientation</button>
             </div>
           </div>
@@ -1099,6 +1100,9 @@
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); makeComponentFromSelection();">Make Component</div>
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); insertComponentInstance();">Insert Component Instance</div>
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); makeUniqueComponent();" title="Select a Component instance first">Make Unique</div>
+  <div class="top-menu-dropdown-sep"></div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); applyTransformToSelected({loc:true, rot:true, scale:true});" title="Bakes Location/Rotation/Scale into the mesh, resets the object's transform to identity">Apply Transform (Loc/Rot/Scale)</div>
+  <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); setOriginToGeometry();" title="Moves the pivot to the mesh's own center, without moving the mesh">Set Origin to Geometry</div>
   <div class="top-menu-dropdown-sep"></div>
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); convertToGuide();" title="Select a drawn Line first">Make Guide (dashed)</div>
   <div class="top-menu-dropdown-sep"></div>
