@@ -5277,7 +5277,7 @@ function switchWS(el, ws) {
         shade:    () => { switchInteractionMode('object');   switchRightTab('mat'); },
         render:   () => { switchInteractionMode('object');   switchRightTab('render'); setShadingMode('RAYTRACE'); },
         present:  () => { enterPresentMode(); },
-        bim:      () => { switchInteractionMode('object');   switchRightTab('object'); },
+        bim:      () => { switchInteractionMode('object');   switchRightTab('bim'); },
     };
 
     (modeMap[ws] || modeMap.layout)();
@@ -5288,7 +5288,7 @@ function switchRightTab(tabId) {
     const btn = document.getElementById(`tab-btn-${tabId}`);
     if (btn) btn.classList.add('active');
 
-    const tabs = ['object', 'mod', 'mat', 'render', 'anim', 'sculpt', 'sketchup'];
+    const tabs = ['object', 'mod', 'mat', 'render', 'anim', 'sculpt', 'sketchup', 'bim'];
     tabs.forEach(t => {
         const el = document.getElementById(`tab-${t}`);
         if (el) el.style.display = (t === tabId) ? 'flex' : 'none';

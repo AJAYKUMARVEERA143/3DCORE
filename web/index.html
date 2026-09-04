@@ -464,6 +464,7 @@
         <div class="p-strip-btn" id="tab-btn-sculpt" title="Sculpt Brushes" onclick="switchRightTab('sculpt')">🖌</div>
         <div class="p-strip-btn" id="tab-btn-render" title="Render Settings" onclick="switchRightTab('render')">🌐</div>
         <div class="p-strip-btn" id="tab-btn-sketchup" title="SketchUp Inferences & Tools" onclick="switchRightTab('sketchup')">📐</div>
+        <div class="p-strip-btn" id="tab-btn-bim" title="BIM Properties" onclick="switchRightTab('bim')">🏛</div>
       </div>
 
       <!-- Properties Body Scroll Area -->
@@ -621,23 +622,6 @@
             </div>
           </div>
 
-          <div class="b-accordion-box" id="bim-tools-box">
-            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ BIM (honest — walls / rooms / components)</div>
-            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
-              <button class="transport-btn" onclick="makeRoomsFromWalls()" title="Closed wall loops become room slabs with area">Make Rooms</button>
-              <button class="transport-btn" onclick="addDoorComponent()" title="Door mesh component — Opening tool still cuts the hole">Add Door</button>
-              <button class="transport-btn" onclick="addWindowComponent()" title="Window mesh component">Add Window</button>
-              <button class="transport-btn" onclick="addStorey()" title="Add a 3 m storey; new walls sit on it">Add Level</button>
-              <button class="transport-btn" onclick="isolateActiveStorey(true)">Isolate Level</button>
-              <button class="transport-btn" onclick="isolateActiveStorey(false)">Show All Levels</button>
-              <button class="transport-btn" onclick="alignSelectionToFloor()">Align to Floor</button>
-              <button class="transport-btn" onclick="addCameraObject()">Add Camera</button>
-              <button class="transport-btn" onclick="lookThroughSelectedCamera()">Look Through Camera</button>
-              <button class="transport-btn" onclick="exportScheduleCsv()">Schedule CSV</button>
-              <button class="transport-btn" onclick="exportPlanDXF()">Plan DXF</button>
-            </div>
-          </div>
-
           <div class="b-accordion-box">
             <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ Normals &amp; Shading</div>
             <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
@@ -668,6 +652,26 @@
               <button class="transport-btn" onclick="applyBlenderModifier('BOOLEAN_DIFF')" title="Subtract the second shape from the first">Subtract</button>
               <button class="transport-btn" onclick="applyBlenderModifier('BOOLEAN_INTERSECT')" title="Keep only the overlapping volume">Intersect</button>
               <button class="transport-btn" onclick="applyBlenderModifier('HOLLOW')" title="Hollow out the selected object into a shell (10cm wall)">Hollow (Shell)</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- BIM Architecture Tab -->
+        <div id="tab-bim" style="display:none; flex-direction:column; gap:4px;">
+          <div class="b-accordion-box" id="bim-tools-box">
+            <div class="b-accordion-header" onclick="toggleAccordion(this)">▼ BIM (honest — walls / rooms / components)</div>
+            <div class="b-accordion-content" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button class="transport-btn" onclick="makeRoomsFromWalls()" title="Closed wall loops become room slabs with area">Make Rooms</button>
+              <button class="transport-btn" onclick="addDoorComponent()" title="Door mesh component — Opening tool still cuts the hole">Add Door</button>
+              <button class="transport-btn" onclick="addWindowComponent()" title="Window mesh component">Add Window</button>
+              <button class="transport-btn" onclick="addStorey()" title="Add a 3 m storey; new walls sit on it">Add Level</button>
+              <button class="transport-btn" onclick="isolateActiveStorey(true)">Isolate Level</button>
+              <button class="transport-btn" onclick="isolateActiveStorey(false)">Show All Levels</button>
+              <button class="transport-btn" onclick="alignSelectionToFloor()">Align to Floor</button>
+              <button class="transport-btn" onclick="addCameraObject()">Add Camera</button>
+              <button class="transport-btn" onclick="lookThroughSelectedCamera()">Look Through Camera</button>
+              <button class="transport-btn" onclick="exportScheduleCsv()">Schedule CSV</button>
+              <button class="transport-btn" onclick="exportPlanDXF()">Plan DXF</button>
             </div>
           </div>
         </div>
