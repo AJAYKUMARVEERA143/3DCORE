@@ -35,6 +35,16 @@ let transformSpace = 'world'; // 'world' | 'local'
 const PROP_RADIUS_STEPS = [0.5, 1, 2, 4, 8];
 let proportionalEditOn = false;
 let proportionalRadius = 2;
+// Real vertex/edge/face geometry snapping during a gizmo translate drag
+// (transform_snap.cc's SCE_SNAP_TO_VERTEX/EDGE_MIDPOINT/FACE modes), on top
+// of the existing grid-only gridSnapOn above. `_liveMouseScreen` is kept
+// current by a plain pointermove listener (see initApp) since
+// TransformControls' own 'objectChange' event only reports the gizmo's own
+// computed delta, not the live cursor position needed to find what's
+// under it.
+const GEO_SNAP_MODES = ['off', 'vertex', 'edge', 'face'];
+let geoSnapMode = 'off';
+let _liveMouseScreen = null; // {x, y} canvas-relative
 let lightingSunScale = 1;
 let lightingPresetName = 'studio';
 let engineExposure = 1;
@@ -102,6 +112,77 @@ function toggleGridSnap(ev) {
     applyTransformSnapSettings();
     refreshSnapChip();
     setVCB('Grid Snap:', gridSnapOn ? formatSnapStep(gridSnapStep) : 'Off');
+}
+
+// ─────────────────────────────────────────────────────────────
+// GEOMETRY SNAP (Blender: transform_snap.cc — SCE_SNAP_TO_VERTEX /
+// SCE_SNAP_TO_EDGE_MIDPOINT / SCE_SNAP_TO_FACE) — snaps the dragged
+// object's origin to the nearest vertex/edge-midpoint/face of another
+// mesh under the live cursor while translating with the gizmo, real
+// raycast-based snapping distinct from gridSnapOn's grid-only rounding
+// above. Reuses the same "check the hit triangle's 3 vertices, then its 3
+// edge midpoints, within a screen-pixel tolerance" approach
+// sketchPointFromEvent() already uses for draw-tool endpoint/midpoint
+// inference — applied here to the whole dragged object instead of a
+// sketch point.
+// ─────────────────────────────────────────────────────────────
+function toggleGeoSnap() {
+    const i = GEO_SNAP_MODES.indexOf(geoSnapMode);
+    geoSnapMode = GEO_SNAP_MODES[(i + 1) % GEO_SNAP_MODES.length];
+    refreshGeoSnapChip();
+    setVCB('Geometry Snap:', geoSnapMode === 'off' ? 'Off' : geoSnapMode[0].toUpperCase() + geoSnapMode.slice(1));
+}
+function refreshGeoSnapChip() {
+    const chip = document.getElementById('geosnap-chip');
+    if (!chip) return;
+    chip.textContent = geoSnapMode === 'off' ? '⌖ Snap: Off' : `⌖ Snap: ${geoSnapMode[0].toUpperCase()}${geoSnapMode.slice(1)}`;
+    chip.classList.toggle('chip-off', geoSnapMode === 'off');
+}
+
+function findGeometrySnapPoint(excludeMesh, screenPoint, canvasRect) {
+    if (!screenPoint || geoSnapMode === 'off') return null;
+    const ndc = new THREE.Vector2(
+        (screenPoint.x / canvasRect.width) * 2 - 1,
+        -(screenPoint.y / canvasRect.height) * 2 + 1
+    );
+    _raycaster.setFromCamera(ndc, camera);
+    const targets = sceneObjects
+        .filter(o => o.mesh && o.mesh.isMesh && o.mesh !== excludeMesh && !isDescendantMeshOf(o.mesh, excludeMesh) && o.mesh.userData.selectable !== false)
+        .map(o => o.mesh);
+    const hits = _raycaster.intersectObjects(targets, false);
+    if (!hits.length || !hits[0].face) return null;
+    const hitInfo = hits[0];
+
+    if (geoSnapMode === 'face') return hitInfo.point.clone();
+
+    const geo = hitInfo.object.geometry;
+    const posAttr = geo.attributes.position;
+    const idxs = [hitInfo.face.a, hitInfo.face.b, hitInfo.face.c];
+    const worldVerts = idxs.map(i => new THREE.Vector3().fromBufferAttribute(posAttr, i).applyMatrix4(hitInfo.object.matrixWorld));
+    const toScreen = p => { const s = p.clone().project(camera); return { x: (s.x * 0.5 + 0.5) * canvasRect.width, y: (-s.y * 0.5 + 0.5) * canvasRect.height }; };
+    const PX_TOL = 18;
+
+    if (geoSnapMode === 'vertex') {
+        let best = null, bestD = Infinity;
+        worldVerts.forEach(v => { const s = toScreen(v); const d = Math.hypot(s.x - screenPoint.x, s.y - screenPoint.y); if (d < bestD) { bestD = d; best = v; } });
+        return bestD <= PX_TOL ? best : null;
+    }
+    if (geoSnapMode === 'edge') {
+        const edges = [[0, 1], [1, 2], [2, 0]];
+        let best = null, bestD = Infinity;
+        edges.forEach(([a, b]) => { const mid = worldVerts[a].clone().lerp(worldVerts[b], 0.5); const s = toScreen(mid); const d = Math.hypot(s.x - screenPoint.x, s.y - screenPoint.y); if (d < bestD) { bestD = d; best = mid; } });
+        return bestD <= PX_TOL ? best : null;
+    }
+    return null;
+}
+
+// Excludes the dragged object's own real children (see parentObjectTo())
+// from snap targets too — snapping a parent onto its own child's geometry
+// while dragging would be a visually meaningless self-reference.
+function isDescendantMeshOf(candidate, ancestor) {
+    let p = candidate.parent;
+    while (p) { if (p === ancestor) return true; p = p.parent; }
+    return false;
 }
 function refreshPropChip() {
     const chip = document.getElementById('prop-chip');
@@ -307,6 +388,10 @@ function initApp() {
         if (gridSnapOn && transformControls.getMode() === 'translate') {
             snapVec3(selectedObject.position, gridSnapStep);
         }
+        if (geoSnapMode !== 'off' && transformControls.getMode() === 'translate' && _liveMouseScreen) {
+            const snapPoint = findGeometrySnapPoint(selectedObject, _liveMouseScreen, renderer.domElement.getBoundingClientRect());
+            if (snapPoint) selectedObject.position.copy(snapPoint);
+        }
         const extras = _dragStartState.extras || [];
         const prop = _dragStartState.prop || [];
         if (extras.length || prop.length) {
@@ -336,6 +421,14 @@ function initApp() {
     axisHelpers = [xLine, yLine];
 
     buildDefaultBlenderScene();
+
+    // Tracks the live cursor for findGeometrySnapPoint() — TransformControls'
+    // own 'objectChange' event only reports its computed drag delta, not
+    // where the mouse actually is, so a plain listener keeps that current.
+    canvas.addEventListener('pointermove', e => {
+        const rect = canvas.getBoundingClientRect();
+        _liveMouseScreen = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    });
 
     setupRaycasterSelection(canvas);
     setupSketchTools(canvas);
@@ -376,6 +469,7 @@ function initApp() {
     if (qSel) qSel.value = renderQualityName;
     applyRenderQuality(renderQualityName);
     refreshPropChip();
+    refreshGeoSnapChip();
     pingStudioService();
     refreshXRButtons();
     registerPwa();
