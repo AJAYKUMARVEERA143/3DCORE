@@ -543,7 +543,8 @@
           <div class="b-accordion-box">
             <div class="b-accordion-header" onclick="toggleAccordion(this)">▶ Relations &amp; Visibility</div>
             <div class="b-accordion-content" style="display:none;">
-              <div class="prop-numeric-row"><span class="prop-label">Parent</span><span style="color:var(--b-text-muted); font-size:10px;">None (root)</span></div>
+              <div class="prop-numeric-row"><span class="prop-label">Parent</span><span id="rel-parent-label" style="color:var(--b-text-muted); font-size:10px;">None (root)</span></div>
+              <button class="transport-btn" style="margin-top:4px; margin-bottom:4px;" onclick="clearParentSelected()" title="Drag this object onto another row in the Outliner to parent it; this clears that relationship">Clear Parent</button>
               <label style="display:flex; align-items:center; gap:6px; margin-top:4px;"><input type="checkbox" id="rel-visible" checked onchange="setSelectedVisibility(this.checked)"> Show in Viewport</label>
               <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="rel-selectable" checked onchange="setSelectedSelectable(this.checked)"> Selectable</label>
               <div class="prop-numeric-row" style="margin-top:6px;">

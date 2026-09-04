@@ -553,23 +553,51 @@ function renderOutliner() {
     const coll = document.createElement('div');
     coll.style.cssText = 'padding-left:14px; color:#888; font-size:10px; padding:2px 4px 2px 14px;';
     coll.textContent = '📁 Collection';
+    // Dropping a row here (rather than onto another row) clears its parent —
+    // "drag to the Collection line to send back to root", same convention
+    // Blender's own Outliner uses for its top-level Collection row.
+    coll.ondragover = e => e.preventDefault();
+    coll.ondrop = e => {
+        e.preventDefault();
+        const dragged = sceneObjects.find(o => o.mesh && o.mesh.uuid === e.dataTransfer.getData('text/plain'));
+        if (dragged) parentObjectTo(dragged.mesh, null);
+    };
     list.appendChild(coll);
 
+    // Real depth-first tree, not a flat list — nests each row under
+    // whatever THREE.Object3D it's actually parented to (Group/Component
+    // membership already worked this way; real free-standing parenting via
+    // parentObjectTo()/drag-and-drop below now uses the same mechanism), so
+    // the Outliner always reflects the true live scene graph.
+    const byParent = new Map(); // parent mesh (or null for root) -> [entries]
     sceneObjects.forEach(item => {
+        const p = parentEntryOf(item.mesh);
+        const key = p ? p.mesh : null;
+        if (!byParent.has(key)) byParent.set(key, []);
+        byParent.get(key).push(item);
+    });
+
+    const ICONS = { camera: '📷', light: '💡', curve: '➰', guide: '📏', group: '🗃', component: '🧩', sectionplane: '✂️' };
+
+    function renderRow(item, depth) {
         const isSel = selectedObject === item.mesh;
         const isMulti = outlinerMultiSelect.has(item.mesh);
-        const ICONS = { camera: '📷', light: '💡', curve: '➰', guide: '📏', group: '🗃', component: '🧩', sectionplane: '✂️' };
-        const icon  = ICONS[item.type] || '📦';
+        const icon = ICONS[item.type] || '📦';
 
         const row = document.createElement('div');
         row.className = `tree-row ${isSel ? 'selected' : ''}`;
-        row.style.paddingLeft = '24px';
+        row.style.paddingLeft = `${24 + depth * 16}px`;
+        row.draggable = true;
         if (isMulti) row.style.outline = '1px solid #e97426';
         const hidden = item.mesh.visible === false;
+        const notSelectable = item.mesh.userData.selectable === false;
+        const notRenderable = !!item.hideRender;
         row.innerHTML = `
             <div class="tree-row-left" style="${hidden ? 'opacity:0.4;' : ''}">${icon} <span>${item.name}</span></div>
             <div class="tree-row-right" style="font-size:10px; color:#666;">
                 <span class="outliner-lock-toggle" title="${item.locked ? 'Locked — click to unlock' : 'Unlocked — click to lock'}" style="cursor:pointer;">${item.locked ? '🔒' : '🔓'}</span>
+                <span class="outliner-select-toggle" title="${notSelectable ? 'Not selectable in viewport — click to allow' : 'Selectable — click to disable'}" style="cursor:pointer; opacity:${notSelectable ? 0.35 : 1};">🖱</span>
+                <span class="outliner-render-toggle" title="${notRenderable ? 'Excluded from export — click to include' : 'Included in export — click to exclude'}" style="cursor:pointer; opacity:${notRenderable ? 0.35 : 1};">🎬</span>
                 <span class="outliner-vis-toggle" title="${hidden ? 'Hidden — click to show' : 'Visible — click to hide'}" style="cursor:pointer;">${hidden ? '🚫' : '👁'}</span>
             </div>
         `;
@@ -582,8 +610,29 @@ function renderOutliner() {
         };
         row.querySelector('.outliner-vis-toggle').onclick = e => { e.stopPropagation(); toggleObjectVisibility(item.mesh); };
         row.querySelector('.outliner-lock-toggle').onclick = e => { e.stopPropagation(); outlinerMultiSelect.clear(); selectObject(item.mesh); toggleLockSelected(); };
+        row.querySelector('.outliner-select-toggle').onclick = e => { e.stopPropagation(); toggleObjectSelectable(item.mesh); };
+        row.querySelector('.outliner-render-toggle').onclick = e => { e.stopPropagation(); toggleObjectRenderable(item.mesh); };
+
+        // Drag-and-drop reparenting — drop one row onto another to make the
+        // dragged object a real child of the drop target (space_outliner/
+        // outliner_dragdrop.cc's parent_drop_set_parents(), simplified to a
+        // plain drag with no modifier key since this app has no separate
+        // "link" vs "parent" drop mode to disambiguate).
+        row.ondragstart = e => { e.dataTransfer.setData('text/plain', item.mesh.uuid); e.dataTransfer.effectAllowed = 'move'; };
+        row.ondragover = e => { e.preventDefault(); row.style.background = 'rgba(233,116,38,0.15)'; };
+        row.ondragleave = () => { row.style.background = ''; };
+        row.ondrop = e => {
+            e.preventDefault();
+            row.style.background = '';
+            const dragged = sceneObjects.find(o => o.mesh && o.mesh.uuid === e.dataTransfer.getData('text/plain'));
+            if (dragged && dragged.mesh !== item.mesh) parentObjectTo(dragged.mesh, item.mesh);
+        };
+
         list.appendChild(row);
-    });
+        (byParent.get(item.mesh) || []).forEach(child => renderRow(child, depth + 1));
+    }
+
+    (byParent.get(null) || []).forEach(item => renderRow(item, 0));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2787,6 +2836,8 @@ function updateInspectorFromSelected() {
     syncDeltaFields(obj);
     const visEl = document.getElementById('rel-visible'); if (visEl) visEl.checked = obj.visible !== false;
     const selEl = document.getElementById('rel-selectable'); if (selEl) selEl.checked = obj.userData.selectable !== false;
+    const parentLabelEl = document.getElementById('rel-parent-label');
+    if (parentLabelEl) { const pEntry = parentEntryOf(obj); parentLabelEl.textContent = pEntry ? pEntry.name : 'None (root)'; }
     updateEntityInfo();
     updateLightPropertiesPanel(obj);
 }
@@ -2932,10 +2983,49 @@ function setSelectedVisibility(visible) {
     });
 }
 
+// ─────────────────────────────────────────────────────────────
+// RESTRICT TOGGLES — Blender Outliner's 3 independent per-row flags
+// (outliner_draw.cc: SO_RESTRICT_SELECT / SO_RESTRICT_RENDER, alongside
+// the viewport-visibility eye icon `outliner-vis-toggle` above). Two of
+// the three already existed as this app's own real mechanism —
+// `userData.selectable` already gates both raycast-select paths
+// (setupRaycasterSelection, SketchUp on-face click) via the Object
+// Properties "Selectable" checkbox — just not reachable per-row in the
+// Outliner until now. `hideRender` is the genuinely new third flag:
+// an object can stay visible and selectable in the viewport while being
+// excluded from GLB/STL/OBJ export, consumed by exportableMeshObjects().
+// ─────────────────────────────────────────────────────────────
+function toggleObjectSelectable(mesh) {
+    const before = mesh.userData.selectable !== false;
+    const after = !before;
+    mesh.userData.selectable = after;
+    if (!after && selectedObject === mesh) selectObject(null);
+    renderOutliner();
+    if (selectedObject === mesh) { const el = document.getElementById('rel-selectable'); if (el) el.checked = after; }
+    setVCB('Selectable:', `${mesh.name}: ${after ? 'on' : 'off'}`);
+    pushUndo({
+        undo() { mesh.userData.selectable = before; renderOutliner(); if (selectedObject === mesh) { const el = document.getElementById('rel-selectable'); if (el) el.checked = before; } },
+        redo() { mesh.userData.selectable = after; renderOutliner(); if (selectedObject === mesh) { const el = document.getElementById('rel-selectable'); if (el) el.checked = after; } },
+    });
+}
+
+function toggleObjectRenderable(mesh) {
+    const entry = sceneObjects.find(o => o.mesh === mesh);
+    if (!entry) return;
+    const before = !!entry.hideRender;
+    const after = !before;
+    entry.hideRender = after;
+    renderOutliner();
+    setVCB('Renderable:', `${mesh.name}: ${after ? 'excluded from export' : 'included in export'}`);
+    pushUndo({
+        undo() { entry.hideRender = before; renderOutliner(); },
+        redo() { entry.hideRender = after; renderOutliner(); },
+    });
+}
+
 function setSelectedSelectable(selectable) {
     if (!selectedObject) return;
-    selectedObject.userData.selectable = selectable;
-    setVCB('Selectable:', `${selectedObject.name}: ${selectable ? 'on' : 'off'}`);
+    toggleObjectSelectable(selectedObject); // checkbox onchange always represents an actual flip
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -8670,11 +8760,95 @@ function removeSceneObject(mesh) {
     const idx = sceneObjects.findIndex(o => o.mesh === mesh);
     if (idx === -1) return false;
     if (selectedObject === mesh) transformControls.detach();
-    scene.remove(mesh);
+    // Rescue any real children (see parentObjectTo() below) to the scene
+    // root first, keeping their world transform — otherwise removing this
+    // mesh from its actual parent would silently drag its whole subtree out
+    // of the graph with it, leaving their still-tracked sceneObjects entries
+    // pointing at meshes no longer in the scene at all.
+    sceneObjects.forEach(o => { if (o.mesh && o.mesh.parent === mesh) scene.attach(o.mesh); });
+    if (mesh.parent) mesh.parent.remove(mesh); else scene.remove(mesh);
     sceneObjects.splice(idx, 1);
     if (selectedObject === mesh) selectObject(null);
     renderOutliner();
     return true;
+}
+
+// ─────────────────────────────────────────────────────────────
+// REAL OBJECT PARENTING (Blender: object_relations.cc parent_set(), and
+// space_outliner/outliner_dragdrop.cc's drag-a-row-onto-another-row UX) —
+// distinct from Group/Component, which bundle objects into one rigid unit.
+// A parent-child relationship keeps the child independently selectable/
+// transformable while it inherits the parent's motion. This is exactly
+// what THREE.Object3D.attach() already computes (Blender does the same
+// thing manually via a stored `parentinv` matrix): re-parenting through
+// attach() keeps the object's WORLD transform fixed by adjusting its local
+// transform to compensate, so nothing visually jumps.
+//
+// No separate `parent` field is kept on sceneObjects entries — mesh.parent
+// (the real THREE graph) is the single source of truth, read back via
+// parentEntryOf() below, so Group/Component membership (which already
+// reparents through the same THREE mechanism) and this new relationship
+// can never disagree with each other.
+// ─────────────────────────────────────────────────────────────
+function parentEntryOf(mesh) {
+    if (!mesh || !mesh.parent || mesh.parent === scene) return null;
+    return sceneObjects.find(o => o.mesh === mesh.parent) || null;
+}
+
+// True if parenting `mesh` under `candidateParent` would create a cycle —
+// i.e. candidateParent IS mesh, or mesh is already an ancestor of
+// candidateParent (mirrors BKE_object_is_child_recursive(), the same check
+// outliner_dragdrop.cc's parent_drop_allowed() runs before allowing a drop).
+function wouldCreateParentCycle(candidateParent, mesh) {
+    let p = candidateParent;
+    while (p) {
+        if (p === mesh) return true;
+        p = (p.parent && p.parent !== scene) ? p.parent : null;
+    }
+    return false;
+}
+
+function parentObjectTo(childMesh, parentMesh) {
+    const childEntry = sceneObjects.find(o => o.mesh === childMesh);
+    if (!childEntry) return false;
+    if (childEntry.locked) { setVCB('Parent:', `${childMesh.name} is locked`); return false; }
+    if (parentMesh) {
+        if (parentMesh === childMesh) { setVCB('Parent:', 'Cannot parent an object to itself'); return false; }
+        if (wouldCreateParentCycle(parentMesh, childMesh)) { setVCB('Parent:', 'Would create a parenting cycle — not allowed'); return false; }
+    }
+    if (childMesh.parent === (parentMesh || scene)) return false; // already there, nothing to do
+
+    const beforeParent = childMesh.parent || scene;
+    const beforePos = childMesh.position.clone(), beforeQuat = childMesh.quaternion.clone(), beforeScale = childMesh.scale.clone();
+
+    const target = parentMesh || scene;
+    target.attach(childMesh); // real world-transform-preserving reparent
+
+    const afterParent = target;
+    const afterPos = childMesh.position.clone(), afterQuat = childMesh.quaternion.clone(), afterScale = childMesh.scale.clone();
+
+    renderOutliner();
+    if (selectedObject === childMesh) updateInspectorFromSelected();
+    setVCB('Parent:', parentMesh ? `${childMesh.name} → ${parentMesh.name}` : `${childMesh.name} → (root)`);
+
+    pushUndo({
+        undo() {
+            beforeParent.add(childMesh);
+            childMesh.position.copy(beforePos); childMesh.quaternion.copy(beforeQuat); childMesh.scale.copy(beforeScale);
+            renderOutliner(); if (selectedObject === childMesh) updateInspectorFromSelected();
+        },
+        redo() {
+            afterParent.add(childMesh);
+            childMesh.position.copy(afterPos); childMesh.quaternion.copy(afterQuat); childMesh.scale.copy(afterScale);
+            renderOutliner(); if (selectedObject === childMesh) updateInspectorFromSelected();
+        },
+    });
+    return true;
+}
+
+function clearParentSelected() {
+    if (!selectedObject) { setVCB('Parent:', 'Select an object first'); return; }
+    parentObjectTo(selectedObject, null);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -9979,7 +10153,7 @@ function isStructuralMesh(o) {
     return kind === 'wall' || kind === 'door' || kind === 'window' || /^Slab(\.\d+)?$/.test(o.name);
 }
 function exportableMeshObjects() {
-    const all = sceneObjects.filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh);
+    const all = sceneObjects.filter(o => o.type === 'mesh' && o.mesh && o.mesh.isMesh && !o.hideRender);
     return exportStructureOnly ? all.filter(isStructuralMesh) : all;
 }
 
