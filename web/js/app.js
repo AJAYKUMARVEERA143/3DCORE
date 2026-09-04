@@ -7656,8 +7656,21 @@ let edgeHighlightMesh = null;
 // the same geometry worked, since its selection was the union of several
 // smaller correctly-grouped patches). Still far tighter than would ever
 // weld deliberately-separate geometry at normal scales.
+// Rounds to 4dp as a NUMBER first and folds -0 to 0 before formatting —
+// plain `n.toFixed(4)` keeps the sign on values that round to zero from
+// the negative side (`(-2.4e-16).toFixed(4)` is the string "-0.0000", not
+// "0.0000"), which silently produces a DIFFERENT key than a genuine 0 at
+// the same spot. Real-world trigger: a full-revolution mesh's seam vertex
+// computed via `Math.sin(2*Math.PI)` (≈ -2.4e-16, not exactly 0, a known
+// JS floating-point quirk) failing to match its angle-0 counterpart's
+// exact `0` — caught by findBoundaryLoops() misreading a cylinder wall's
+// shared seam edge as two separate naked edges instead of one shared one.
+function roundKeyComponent(n) {
+    const r = Math.round(n * 10000) / 10000;
+    return (r === 0 ? 0 : r).toFixed(4); // `-0 === 0` is true in JS, so this also folds -0
+}
 function positionKey(pos, i) {
-    return `${pos.getX(i).toFixed(4)},${pos.getY(i).toFixed(4)},${pos.getZ(i).toFixed(4)}`;
+    return `${roundKeyComponent(pos.getX(i))},${roundKeyComponent(pos.getY(i))},${roundKeyComponent(pos.getZ(i))}`;
 }
 
 function buildPositionGroups(mesh) {
@@ -9853,6 +9866,124 @@ function runMergeByDistance() {
     });
     setVCB('Merge by Distance:', 'Nearby vertices welded');
     return true;
+}
+
+// ─────────────────────────────────────────────────────────────
+// BRIDGE EDGE LOOPS (Blender: bmo_bridge.cc's bridge_loop_pair(),
+// bm_edgeloop_offset_length()) — real naked-edge boundary-loop detection
+// (an edge used by exactly 1 triangle is a naked/boundary edge — no
+// reconstructed quad/half-edge structure needed, unlike a faithful Loop
+// Select/Edge Ring Select/ring-based Loop Cut, which this app's plain
+// triangle-soup geometry genuinely can't support without a real half-edge
+// mesh: a triangulation "diagonal" edge doesn't correspond to walking
+// through adjacent geometric FACES the way Blender's real quad-mesh
+// walkers do, so that trio was deliberately NOT built this pass rather
+// than shipped half-working — see ROADMAP). Finds the mesh's exactly-two
+// open boundary loops, tries every rotational offset AND both winding
+// directions of one against the other to find the alignment that
+// minimizes total connector length (the real "least twist" heuristic),
+// then stitches a quad strip between them.
+// ─────────────────────────────────────────────────────────────
+function findBoundaryLoops(mesh) {
+    ensureNonIndexed(mesh);
+    const pos = mesh.geometry.attributes.position;
+    const n = pos.count;
+    const edgeMap = new Map(); // edgeKey -> [[i,j], ...] occurrences
+    for (let t = 0; t < n; t += 3) {
+        const tri = [t, t + 1, t + 2];
+        for (let e = 0; e < 3; e++) {
+            const i = tri[e], j = tri[(e + 1) % 3];
+            const key = edgeKeyOf(mesh, i, j);
+            if (!edgeMap.has(key)) edgeMap.set(key, []);
+            edgeMap.get(key).push([i, j]);
+        }
+    }
+    // Naked (boundary) edges: used by exactly 1 triangle. Chain them
+    // start-key -> next-key (following the triangle's own winding, so a
+    // consistent direction survives the walk) into ordered position loops.
+    const nextOf = new Map(); // positionKey(i) -> positionKey(j)
+    edgeMap.forEach(occ => {
+        if (occ.length !== 1) return;
+        const [i, j] = occ[0];
+        nextOf.set(positionKey(pos, i), positionKey(pos, j));
+    });
+
+    const visited = new Set();
+    const loops = [];
+    nextOf.forEach((_, startKey) => {
+        if (visited.has(startKey)) return;
+        const loop = [];
+        let cur = startKey, guard = 0;
+        while (cur && !visited.has(cur) && guard++ < 100000) {
+            visited.add(cur);
+            loop.push(cur);
+            cur = nextOf.get(cur);
+        }
+        if (loop.length >= 3 && cur === startKey) loops.push(loop); // only a genuinely closed loop is usable
+    });
+    return loops; // array of arrays of positionKey strings ("x,y,z"), each in order around one boundary loop
+}
+
+function parsePositionKeyToVec(key) {
+    const [x, y, z] = key.split(',').map(Number);
+    return new THREE.Vector3(x, y, z);
+}
+
+function bridgeEdgeLoops(mesh) {
+    const loops = findBoundaryLoops(mesh);
+    if (loops.length !== 2) return { ok: false, reason: `Found ${loops.length} closed boundary loop(s) — need exactly 2` };
+    const [loopA, loopB] = loops;
+    if (loopA.length !== loopB.length) return { ok: false, reason: `Loops have different vertex counts (${loopA.length} vs ${loopB.length})` };
+    const n = loopA.length;
+
+    const ptA = loopA.map(parsePositionKeyToVec);
+    const ptB = loopB.map(parsePositionKeyToVec);
+
+    // Brute-force every rotational offset and both winding directions of
+    // B against A, keeping whichever minimizes total connector length —
+    // real algorithm, not a heuristic guess: bm_edgeloop_offset_length()
+    // does the exact same O(n^2) search.
+    let best = null;
+    [false, true].forEach(reversed => {
+        const B = reversed ? ptB.slice().reverse() : ptB;
+        for (let off = 0; off < n; off++) {
+            let total = 0;
+            for (let i = 0; i < n; i++) total += ptA[i].distanceTo(B[(i + off) % n]);
+            if (!best || total < best.total) best = { total, off, reversed, B };
+        }
+    });
+    const alignedB = [];
+    for (let i = 0; i < n; i++) alignedB.push(best.B[(i + best.off) % n]);
+
+    const pos = mesh.geometry.attributes.position;
+    const newPositions = Array.from(pos.array); // existing triangles untouched, strip appended after
+    for (let i = 0; i < n; i++) {
+        const a0 = ptA[i], a1 = ptA[(i + 1) % n];
+        const b0 = alignedB[i], b1 = alignedB[(i + 1) % n];
+        newPositions.push(a0.x, a0.y, a0.z, a1.x, a1.y, a1.z, b0.x, b0.y, b0.z);
+        newPositions.push(a1.x, a1.y, a1.z, b1.x, b1.y, b1.z, b0.x, b0.y, b0.z);
+    }
+    const newGeo = new THREE.BufferGeometry();
+    newGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPositions), 3));
+    newGeo.computeVertexNormals();
+    return { ok: true, geometry: newGeo, quadCount: n };
+}
+
+function runBridgeEdgeLoops() {
+    const obj = selectedObject;
+    if (!obj || !obj.isMesh) { setVCB('Bridge Edge Loops:', 'Select a mesh object first'); return; }
+    ensureNonIndexed(obj);
+    const beforeGeo = deepCloneGeometry(obj.geometry);
+    const result = bridgeEdgeLoops(obj);
+    if (!result.ok) { beforeGeo.dispose(); setVCB('Bridge Edge Loops:', result.reason); return; }
+    obj.geometry.dispose();
+    obj.geometry = result.geometry;
+    const afterGeo = deepCloneGeometry(obj.geometry);
+    pushUndo({
+        undo() { obj.geometry.dispose(); obj.geometry = beforeGeo; },
+        redo() { obj.geometry.dispose(); obj.geometry = afterGeo; },
+    });
+    setVCB('Bridge Edge Loops:', `${result.quadCount} quads added`);
 }
 
 // ─────────────────────────────────────────────────────────────
