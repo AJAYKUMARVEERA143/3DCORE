@@ -263,6 +263,15 @@
       <button class="transport-btn" style="width:100%; margin-top:6px;" onclick="saveOpeningPreset()">Save as Preset…</button>
       <div style="font-size:9px; color:var(--b-text-muted); margin-top:6px;">Click a wall, then drag a rectangle on it to cut the opening.</div>
     </div>
+    <div id="tool-settings-freehand3d" style="display:none;">
+      <label style="font-size:9.5px; color:#aaa; display:block;">Depth (m)
+        <input type="number" id="freehand3d-depth" value="0.6" step="0.05" min="0.05" max="5" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="freehand3dSettings.depth=parseFloat(this.value)||0.6">
+      </label>
+      <label style="font-size:9.5px; color:#aaa; display:block; margin-top:6px;">Brush Size (m)
+        <input type="number" id="freehand3d-brush" value="0.05" step="0.01" min="0.01" max="0.5" style="width:100%; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:3px; border-radius:3px; margin-top:2px;" onchange="freehand3dSettings.brushSize=parseFloat(this.value)||0.05">
+      </label>
+      <div style="font-size:9px; color:var(--b-text-muted); margin-top:6px;">Draw a closed shape with a pen or the mouse — release to inflate it into a real 3D mesh. Touch stays free to orbit while you draw.</div>
+    </div>
   </div>
 
   <!-- SketchUp "Getting Started" Floating Tool Palette (Official UTC Guide) -->
@@ -300,6 +309,9 @@
     </button>
     <button class="su-palette-btn" id="tb-arc" onclick="setActiveTool('arc')" title="2-Point Arc (A)">
       <svg viewBox="0 0 20 20"><path d="M3 17 Q10 3 17 17" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="3" cy="17" r="2" fill="currentColor"/><circle cx="17" cy="17" r="2" fill="currentColor"/></svg>
+    </button>
+    <button class="su-palette-btn" id="tb-freehand3d" onclick="setActiveTool('freehand3d')" title="Freehand 3D — draw a closed shape with a pen or mouse; release to inflate it into a real mesh. Touch stays free to orbit.">
+      <svg viewBox="0 0 20 20"><path d="M4 12 C4 6 8 3 12 4 C16 5 17 10 14 13 C12 15 8 16 6 14 C5 13 4 13 4 12 Z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="9.5" r="2.6" fill="currentColor" opacity=".35"/></svg>
     </button>
     <button class="su-palette-btn" id="tb-polygon" onclick="setActiveTool('polygon')" title="Polygon — click center, drag radius">
       <svg viewBox="0 0 20 20"><polygon points="10,2 17,7 15,16 5,16 3,7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>

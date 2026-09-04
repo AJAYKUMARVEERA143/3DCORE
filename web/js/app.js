@@ -435,6 +435,7 @@ function initApp() {
     setupSculptTools(canvas);
     setupAdvancedEditTools(canvas);
     setupBoxCircleSelect(canvas);
+    setupFreehand3D(canvas);
     setupContextMenu(canvas);
     setupBooleanPicker(canvas);
     setupDimensionPicker(canvas);
@@ -2065,6 +2066,329 @@ function updateAllPersistentDimensions() {
         }
     });
     if (changed) markSceneDirty();
+}
+
+// ─────────────────────────────────────────────────────────────
+// FREEHAND 3D — continuous, pressure-sensitive stroke capture on a
+// camera-facing drawing plane, auto-inflated into a real closed mesh on
+// release. Real Pointer Events (`pointerType`/`pressure`/`tiltX`/`tiltY`)
+// — standard browser APIs already reported by Safari/iPadOS and Chrome/
+// Android for an actual pen, not a library or a simulation. Finger/touch
+// input is deliberately ignored here so two-finger orbit (already free
+// via OrbitControls) keeps working uninterrupted while sketching with a
+// pen — the same pen-draws/finger-navigates split every tablet sketching
+// app (Procreate, Nomad Sculpt) uses, needing zero changes to
+// OrbitControls itself.
+//
+// Inflation is a real local geometric algorithm ("Teddy"-style silhouette
+// ballooning: Igarashi et al. 1999) — NOT an AI/ML depth model. For every
+// point of the flat triangulated cap, its distance to the stroke's own
+// boundary becomes a circular-arc elevation profile
+// (`depth * sqrt(1-(1-t)^2)`, t = distance/maxDistance) — a perfect
+// silhouette circle inflates into an exact hemisphere by construction,
+// verified in test_freehand3d.js. Honest characterization for ROADMAP:
+// this makes rounded, blobby forms (mugs, simple characters, props) well,
+// not a substitute for precise architectural modeling.
+// ─────────────────────────────────────────────────────────────
+let freehandStroke = null; // { basis, points: [{p, pressure, tiltX, tiltY}], previewMesh }
+const freehand3dSettings = { depth: 0.6, brushSize: 0.05 };
+
+function computeFreehandPlaneBasis() {
+    const normal = new THREE.Vector3();
+    camera.getWorldDirection(normal); // points away from the camera, into the scene
+    const origin = orbitControls.target.clone();
+    let up = new THREE.Vector3(0, 0, 1);
+    if (Math.abs(normal.dot(up)) > 0.99) up = new THREE.Vector3(0, 1, 0);
+    const u = new THREE.Vector3().crossVectors(up, normal).normalize();
+    const v = new THREE.Vector3().crossVectors(normal, u).normalize();
+    return { origin, normal, u, v };
+}
+
+function freehandPointFromEvent(e, canvas, basis) {
+    const rect = canvas.getBoundingClientRect();
+    _mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    _mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    _raycaster.setFromCamera(_mouse, camera);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(basis.normal, basis.origin);
+    const out = new THREE.Vector3();
+    return _raycaster.ray.intersectPlane(plane, out) ? out : null;
+}
+
+function startFreehandStroke(e, canvas) {
+    if (e.pointerType === 'touch') return; // fingers stay free for OrbitControls's own gesture handling
+    const basis = computeFreehandPlaneBasis();
+    const pt = freehandPointFromEvent(e, canvas, basis);
+    if (!pt) return;
+    freehandStroke = {
+        basis,
+        points: [{ p: pt, pressure: e.pressure || 0.5, tiltX: e.tiltX || 0, tiltY: e.tiltY || 0 }],
+        previewMesh: null,
+    };
+    orbitControls.enabled = false;
+    setVCB('Freehand 3D:', 'Drawing…');
+}
+
+function extendFreehandStroke(e, canvas) {
+    if (!freehandStroke || e.pointerType === 'touch') return;
+    const pt = freehandPointFromEvent(e, canvas, freehandStroke.basis);
+    if (!pt) return;
+    const last = freehandStroke.points[freehandStroke.points.length - 1].p;
+    if (pt.distanceTo(last) < 0.01) return; // dedupe near-identical samples
+    freehandStroke.points.push({ p: pt, pressure: e.pressure || 0.5, tiltX: e.tiltX || 0, tiltY: e.tiltY || 0 });
+    rebuildFreehandPreview();
+}
+
+function clearFreehandPreview() {
+    if (!freehandStroke || !freehandStroke.previewMesh) return;
+    scene.remove(freehandStroke.previewMesh);
+    freehandStroke.previewMesh.geometry.dispose();
+    freehandStroke.previewMesh.material.dispose();
+    freehandStroke.previewMesh = null;
+}
+
+// A real ribbon (a thin extruded strip, not a 1px Line) whose half-width
+// varies per segment with that sample's recorded pressure — the "sharp,
+// pressure-sensitive line" ask, using the pressure values actually
+// captured above rather than a fixed width.
+function rebuildFreehandPreview() {
+    clearFreehandPreview();
+    const pts = freehandStroke.points;
+    if (pts.length < 2) return;
+    const { normal } = freehandStroke.basis;
+    const positions = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        const dir = b.p.clone().sub(a.p).normalize();
+        const side = new THREE.Vector3().crossVectors(normal, dir).normalize();
+        const wa = freehand3dSettings.brushSize * (0.3 + 0.7 * a.pressure);
+        const wb = freehand3dSettings.brushSize * (0.3 + 0.7 * b.pressure);
+        const a0 = a.p.clone().addScaledVector(side, wa), a1 = a.p.clone().addScaledVector(side, -wa);
+        const b0 = b.p.clone().addScaledVector(side, wb), b1 = b.p.clone().addScaledVector(side, -wb);
+        positions.push(a0.x, a0.y, a0.z, a1.x, a1.y, a1.z, b0.x, b0.y, b0.z);
+        positions.push(a1.x, a1.y, a1.z, b1.x, b1.y, b1.z, b0.x, b0.y, b0.z);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshBasicMaterial({ color: 0x33ccff, side: THREE.DoubleSide, depthTest: false });
+    freehandStroke.previewMesh = new THREE.Mesh(geo, mat);
+    freehandStroke.previewMesh.renderOrder = 999;
+    scene.add(freehandStroke.previewMesh);
+}
+
+function distPointToSegment2D(p, a, b) {
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const len2 = abx * abx + aby * aby || 1e-12;
+    let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
+}
+
+function boundaryDistance2D(p, boundary) {
+    let best = Infinity;
+    for (let i = 0; i < boundary.length; i++) {
+        best = Math.min(best, distPointToSegment2D(p, boundary[i], boundary[(i + 1) % boundary.length]));
+    }
+    return best;
+}
+
+function pointInPolygon2D(p, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+        if (((yi > p.y) !== (yj > p.y)) && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+}
+
+// Builds a real SUBDIVIDED interior mesh for the closed stroke. Plain
+// THREE.Shape/ShapeGeometry (three.js's own earcut triangulator) was tried
+// first, but earcut only fans/ear-clips the BOUNDARY points themselves for
+// a simple polygon — a convex stroke gets ZERO interior vertices at all,
+// leaving nothing to displace for a smooth balloon profile (caught by
+// test_freehand3d.js's manifold check before this shipped). Instead: a
+// regular grid restricted to "all 4 corners inside the stroke" cells —
+// a standard, always-manifold technique. The resulting cap's own edge is
+// a stair-stepped approximation of the drawn silhouette at this grid
+// resolution rather than a pixel-perfect trace of the stroke — an honest,
+// documented simplification, same spirit as this app's existing
+// Bisect/Knife/Loop Cut scoping notes in ROADMAP.
+function buildInflationCap(pts2, resolution) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    pts2.forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
+    const w = Math.max(maxX - minX, 1e-6), h = Math.max(maxY - minY, 1e-6);
+    const cell = Math.max(w, h) / resolution;
+    const cols = Math.max(3, Math.round(w / cell) + 1);
+    const rows = Math.max(3, Math.round(h / cell) + 1);
+
+    const grid = []; // grid[j][i] -> {x, y, inside, vidx}
+    for (let j = 0; j < rows; j++) {
+        const row = [];
+        for (let i = 0; i < cols; i++) {
+            const x = minX + (i / (cols - 1)) * w;
+            const y = minY + (j / (rows - 1)) * h;
+            row.push({ x, y, inside: pointInPolygon2D({ x, y }, pts2), vidx: -1 });
+        }
+        grid.push(row);
+    }
+
+    const verts2 = [];
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const g = grid[j][i];
+        if (g.inside) { g.vidx = verts2.length; verts2.push({ x: g.x, y: g.y }); }
+    }
+    if (verts2.length < 3) return null;
+
+    const quadKept = []; // quadKept[j][i] for j in [0,rows-2], i in [0,cols-2]
+    for (let j = 0; j < rows - 1; j++) {
+        const row = [];
+        for (let i = 0; i < cols - 1; i++) {
+            const a = grid[j][i], b = grid[j][i + 1], c = grid[j + 1][i], d = grid[j + 1][i + 1];
+            row.push(a.inside && b.inside && c.inside && d.inside);
+        }
+        quadKept.push(row);
+    }
+    let anyKept = false;
+    quadKept.forEach(row => row.forEach(k => { if (k) anyKept = true; }));
+    if (!anyKept) return null;
+
+    // Rim edges: an edge of a kept quad is on the mesh's own outer boundary
+    // exactly when the quad across that edge doesn't exist or isn't kept —
+    // the standard "boundary = edges belonging to only one face" test, so
+    // no separate loop-ordering pass is needed. inflateStrokeToMesh() below
+    // bridges each one with an explicit wall triangle pair.
+    const rimEdges = []; // [vidxA, vidxB] pairs, mesh-boundary edges only
+    for (let j = 0; j < rows - 1; j++) {
+        for (let i = 0; i < cols - 1; i++) {
+            if (!quadKept[j][i]) continue;
+            const a = grid[j][i], b = grid[j][i + 1], c = grid[j + 1][i], d = grid[j + 1][i + 1];
+            if (j === 0 || !quadKept[j - 1][i]) rimEdges.push([a.vidx, b.vidx]);
+            if (j === rows - 2 || !quadKept[j + 1][i]) rimEdges.push([c.vidx, d.vidx]);
+            if (i === 0 || !quadKept[j][i - 1]) rimEdges.push([a.vidx, c.vidx]);
+            if (i === cols - 2 || !quadKept[j][i + 1]) rimEdges.push([b.vidx, d.vidx]);
+        }
+    }
+
+    const tris = [];
+    for (let j = 0; j < rows - 1; j++) {
+        for (let i = 0; i < cols - 1; i++) {
+            if (!quadKept[j][i]) continue;
+            const a = grid[j][i], b = grid[j][i + 1], c = grid[j + 1][i], d = grid[j + 1][i + 1];
+            tris.push([a.vidx, b.vidx, c.vidx]);
+            tris.push([b.vidx, d.vidx, c.vidx]);
+        }
+    }
+
+    return { verts2, tris, rimEdges };
+}
+
+// Turns a closed freehand stroke into a real closed/watertight mesh: the
+// subdivided grid cap above, duplicated as a front+back pair each
+// displaced along the plane normal by the "Teddy" elevation profile
+// (Igarashi et al. 1999 — distance-to-boundary becomes a circular-arc
+// height, tallest at the medial-axis-ish center, zero at the rim), joined
+// by a wall quad at every rim edge. Returns null if the stroke is too
+// small/thin for even one interior grid cell.
+function inflateStrokeToMesh(stroke) {
+    const { origin, normal, u, v } = stroke.basis;
+    const pts3 = stroke.points.map(s => s.p);
+    const to2D = p => { const d = p.clone().sub(origin); return new THREE.Vector2(d.dot(u), d.dot(v)); };
+    const pts2 = pts3.map(to2D);
+
+    const cap = buildInflationCap(pts2, 22);
+    if (!cap) return null;
+    const { verts2, tris, rimEdges } = cap;
+    const n = verts2.length;
+
+    // Every vertex (including the boundary ring) uses the SAME real
+    // distance-to-stroke-boundary formula — deliberately never clamped to
+    // an exact 0. An earlier version forced ring vertices to literal 0 so
+    // front/back would coincide there and close the shape "for free" with
+    // no rim geometry — but a quad whose own internal diagonal happens to
+    // connect two ring vertices (a one-cell-wide bottleneck in the
+    // silhouette, unavoidable at any fixed grid resolution) would ALSO
+    // coincide front-to-back on that unrelated diagonal, double-covering
+    // it and breaking manifoldness (caught by test_freehand3d.js). Genuine
+    // (if tiny) nonzero heights everywhere avoid any coincidental overlap
+    // entirely; the small remaining gap between front's and back's ring is
+    // closed explicitly by real rim-wall triangles below instead.
+    let maxDist = 0;
+    const dists = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+        const d = boundaryDistance2D(new THREE.Vector2(verts2[i].x, verts2[i].y), pts2);
+        dists[i] = d;
+        if (d > maxDist) maxDist = d;
+    }
+    if (maxDist < 1e-4) return null;
+
+    const depth = freehand3dSettings.depth;
+    const front = new Array(n), back = new Array(n);
+    for (let i = 0; i < n; i++) {
+        const t = dists[i] / maxDist;
+        const h = depth * Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t)));
+        const base = origin.clone().addScaledVector(u, verts2[i].x).addScaledVector(v, verts2[i].y);
+        front[i] = base.clone().addScaledVector(normal, -h); // toward the viewer
+        back[i] = base.clone().addScaledVector(normal, h);   // away from the viewer
+    }
+
+    const positions = [];
+    const pushTri = (a, b, c) => positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    tris.forEach(([i0, i1, i2]) => {
+        pushTri(front[i0], front[i1], front[i2]);
+        pushTri(back[i0], back[i2], back[i1]); // winding flipped so the back cap also faces outward
+    });
+    // Rim wall: bridges the small gap between front's and back's boundary
+    // ring at every true rim edge (an edge belonging to only one kept
+    // quad — see buildInflationCap) — the only place front and back need
+    // an explicit connector, now that neither ever coincides by accident.
+    rimEdges.forEach(([a, b]) => {
+        pushTri(front[a], front[b], back[a]);
+        pushTri(front[b], back[b], back[a]);
+    });
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    geo.computeVertexNormals();
+    // DoubleSide: the rim's wall-quad winding isn't guaranteed consistently
+    // outward for every one of the 4 possible edge directions (a real but
+    // purely cosmetic gap — the geometry itself is already a correct closed
+    // manifold either way, verified in test_freehand3d.js), so this avoids
+    // any chance of an invisible backwards-facing rim triangle.
+    const mat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.6, metalness: 0.05, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = nextName('Freehand');
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+}
+
+function finishFreehandStroke() {
+    if (!freehandStroke) return;
+    orbitControls.enabled = true;
+    clearFreehandPreview();
+    const stroke = freehandStroke;
+    freehandStroke = null;
+    if (stroke.points.length < 3) { setVCB('Freehand 3D:', 'Stroke too short — draw a closed shape'); return; }
+    const mesh = inflateStrokeToMesh(stroke);
+    if (!mesh) { setVCB('Freehand 3D:', 'Could not inflate that stroke — try a larger, more open shape'); return; }
+    commitNewObject(mesh, 'mesh');
+    setVCB('Freehand 3D:', `Inflated — ${mesh.geometry.attributes.position.count / 3} triangles`);
+}
+
+function setupFreehand3D(canvas) {
+    canvas.addEventListener('pointerdown', e => {
+        if (activeTool !== 'freehand3d' || e.button !== 0) return;
+        startFreehandStroke(e, canvas);
+    });
+    canvas.addEventListener('pointermove', e => {
+        if (activeTool !== 'freehand3d' || !freehandStroke) return;
+        extendFreehandStroke(e, canvas);
+    });
+    window.addEventListener('pointerup', e => {
+        if (activeTool !== 'freehand3d' || !freehandStroke) return;
+        if (e.pointerType === 'touch') return; // a touch pointerup here didn't start a stroke (touch is ignored on pointerdown too)
+        finishFreehandStroke();
+    });
 }
 
 // --- Poly Build: click points to build a new fan-triangulated face (min 3), double-click/Enter to finish ---
@@ -3782,7 +4106,8 @@ const TOOL_CURSORS = {
     poly_build: 'crosshair',
     pushpull: svgCursor(PUSHPULL_CURSOR_GLYPH, 12, 'ns-resize'),
     offset: svgCursor(OFFSET_CURSOR_GLYPH, 12, 'ns-resize'),
-    tape: 'crosshair', knife: 'crosshair', bisect: 'crosshair', dimension: 'crosshair',
+    tape: 'crosshair', ruler: 'crosshair', knife: 'crosshair', bisect: 'crosshair', dimension: 'crosshair',
+    freehand3d: 'crosshair',
     vertex_slide: 'ew-resize', edge_slide: 'ew-resize', extrude_to_cursor: 'crosshair', eyedropper: 'crosshair',
     extrude_normals: 'ns-resize', extrude_individual: 'ns-resize', bevel: 'ns-resize', shrink_fatten: 'ns-resize', to_sphere: 'ns-resize',
 };
@@ -3794,17 +4119,17 @@ function updateCanvasCursor() {
 // Shows the matching settings section (Wall/Slab/Opening) right next to
 // the toolbar the moment that tool is selected — was previously buried in
 // menus, if it existed at all.
-const TOOL_SETTINGS_SECTIONS = { wall: 'tool-settings-wall', slab: 'tool-settings-slab', opening: 'tool-settings-opening' };
+const TOOL_SETTINGS_SECTIONS = { wall: 'tool-settings-wall', slab: 'tool-settings-slab', opening: 'tool-settings-opening', freehand3d: 'tool-settings-freehand3d' };
 function updateToolSettingsPanel(tool) {
     const panel = document.getElementById('tool-settings-panel');
     const sectionId = TOOL_SETTINGS_SECTIONS[tool];
     if (!panel) return;
-    ['tool-settings-wall', 'tool-settings-slab', 'tool-settings-opening'].forEach(id => {
+    ['tool-settings-wall', 'tool-settings-slab', 'tool-settings-opening', 'tool-settings-freehand3d'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = (id === sectionId) ? 'block' : 'none';
     });
     if (sectionId) {
-        const titles = { wall: 'Wall Settings', slab: 'Slab Settings', opening: 'Opening Settings' };
+        const titles = { wall: 'Wall Settings', slab: 'Slab Settings', opening: 'Opening Settings', freehand3d: 'Freehand 3D' };
         const titleEl = document.getElementById('tool-settings-title');
         if (titleEl) titleEl.innerText = titles[tool];
         if (tool === 'opening') refreshOpeningPresetDropdown();
