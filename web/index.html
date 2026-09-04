@@ -439,6 +439,10 @@
     <!-- Inference tooltip (AutoCAD/SketchUp-style "On Vertex" / "On Red Axis" hint) -->
     <div id="inference-tooltip" class="inference-tooltip"></div>
 
+    <!-- Adjust Last Operation (Blender: the bottom-left "Redo" HUD panel that
+         appears after any operator runs) — see setLastAction()/renderRedoPanel() -->
+    <div id="redo-panel" style="display:none; position:absolute; left:12px; bottom:40px; background:var(--b-bg-panel); border:1px solid var(--b-border-light); border-radius:6px; padding:8px 10px; z-index:41; min-width:150px; box-shadow:0 6px 20px rgba(0,0,0,0.5);"></div>
+
     <!-- SketchUp Value Control Box (VCB / Measurements) (Bottom-Right of Viewport) -->
     <div class="sketchup-measurement-vcb-box" id="su-vcb" style="display:flex; align-items:center; gap:8px;">
       <span class="vcb-label" id="vcb-label">Measurements:</span>

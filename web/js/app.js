@@ -2962,6 +2962,7 @@ function setupAdvancedEditTools(canvas) {
             selectedFaces = _faceAmountStroke.faceGroup;
             cfg.apply(mesh, amount);
             rebuildFaceHighlight();
+            _faceAmountStroke.lastAmount = amount; // read at commit time below, to seed the Adjust Last Operation panel
             setVCB(`${cfg.label}:`, `${amount >= 0 ? '+' : ''}${amount.toFixed(2)}`);
             return;
         }
@@ -3036,11 +3037,35 @@ function setupAdvancedEditTools(canvas) {
             if (a.length !== b.length) changed = true;
             else for (let i = 0; i < a.length; i++) { if (Math.abs(a[i] - b[i]) > 1e-6) { changed = true; break; } }
             if (changed) {
-                pushUndo({
+                const command = {
                     undo() { mesh.geometry.dispose(); mesh.geometry = baseGeo; rebuildFaceHighlight(); },
                     redo() { mesh.geometry.dispose(); mesh.geometry = afterGeo; rebuildFaceHighlight(); },
-                });
+                };
+                pushUndo(command);
                 propagateComponentEdit(mesh);
+
+                // Adjust Last Operation — only for tools with a single
+                // scalar `amount` (every FACE_AMOUNT_TOOLS entry); the
+                // committed drag's own final value seeds the panel, so
+                // typing the SAME number back in is a no-op.
+                const faceGroupLocal = _faceAmountStroke.faceGroup.slice();
+                setLastAction({
+                    label: FACE_AMOUNT_TOOLS[kind].label,
+                    params: { amount: _faceAmountStroke.lastAmount || 0 },
+                    command,
+                    apply(params) {
+                        mesh.geometry.dispose();
+                        mesh.geometry = deepCloneGeometry(baseGeo);
+                        selectedFaces = faceGroupLocal.slice();
+                        FACE_AMOUNT_TOOLS[kind].apply(mesh, params.amount);
+                        rebuildFaceHighlight();
+                        const newAfterGeo = deepCloneGeometry(mesh.geometry);
+                        command.redo = () => { mesh.geometry.dispose(); mesh.geometry = newAfterGeo; rebuildFaceHighlight(); };
+                        propagateComponentEdit(mesh);
+                        setVCB(`${FACE_AMOUNT_TOOLS[kind].label}:`, `${params.amount >= 0 ? '+' : ''}${params.amount.toFixed(2)}`);
+                        markSceneDirty();
+                    },
+                });
             } else {
                 mesh.geometry.dispose();
                 mesh.geometry = baseGeo;
@@ -10277,11 +10302,18 @@ function pushUndo(command) {
     if (undoStack.length > MAX_UNDO) undoStack.shift();
     redoStack.length = 0;
     scheduleAutosave();
+    // Any newly committed action invalidates whatever Adjust Last Operation
+    // panel was showing for the PREVIOUS one (same as Blender's
+    // last_redo_poll() failing once you've done anything else) — tools that
+    // support the panel re-establish it via setLastAction() right after
+    // this call, so this only ever clears a genuinely stale one.
+    clearLastAction();
 }
 
 function undo() {
     const cmd = undoStack.pop();
     if (!cmd) { setVCB('Undo:', 'Nothing to undo'); return; }
+    clearLastAction();
     cmd.undo();
     redoStack.push(cmd);
     renderOutliner();
@@ -10293,12 +10325,63 @@ function undo() {
 function redo() {
     const cmd = redoStack.pop();
     if (!cmd) { setVCB('Redo:', 'Nothing to redo'); return; }
+    clearLastAction();
     cmd.redo();
     undoStack.push(cmd);
     renderOutliner();
     updateHUD();
     scheduleAutosave();
     setVCB('Redo', `${redoStack.length} step(s) left`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// ADJUST LAST OPERATION (Blender: wm_operators.cc's redo popup —
+// WM_operator_redo_popup()/wm_block_create_redo(), backed by wmOperator's
+// own stored IDProperty bag of the exact final args it ran with, and
+// ed_undo.cc's ED_undo_operator_repeat(): pop to before-state, re-invoke
+// the operator's exec() with the edited properties, push a fresh undo
+// step) — after a drag-to-set-amount tool commits, a small floating panel
+// lets you type an exact replacement value and it re-applies instantly,
+// instead of having to undo and redo the drag by feel. `command` is the
+// SAME object identity already sitting in undoStack — apply() mutates its
+// `.redo` closure in place on every edit rather than pushing a new undo
+// entry per keystroke, mirroring Blender's "one operator, edited
+// properties" model instead of stacking N redo steps for one logical
+// adjustment.
+// ─────────────────────────────────────────────────────────────
+let lastAction = null; // { label, params, command, apply(params) }
+
+function clearLastAction() {
+    if (!lastAction) return;
+    lastAction = null;
+    renderRedoPanel();
+}
+
+function setLastAction(action) {
+    lastAction = action;
+    renderRedoPanel();
+}
+
+function renderRedoPanel() {
+    const panel = document.getElementById('redo-panel');
+    if (!panel) return;
+    if (!lastAction) { panel.style.display = 'none'; return; }
+    const rows = Object.entries(lastAction.params).map(([key, val]) => `
+        <label style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:9.5px; color:#aaa; margin-top:3px;">
+            <span style="text-transform:capitalize;">${key}</span>
+            <input type="number" step="0.01" value="${val.toFixed(3)}" data-key="${key}"
+                style="width:72px; background:var(--b-bg-input); border:1px solid var(--b-border-light); color:#fff; padding:2px 4px; border-radius:3px;">
+        </label>`).join('');
+    panel.innerHTML = `<div style="font-size:10px; font-weight:700; color:#fff;">▸ ${lastAction.label}</div>${rows}`;
+    panel.querySelectorAll('input').forEach(inp => {
+        inp.oninput = () => {
+            const v = parseFloat(inp.value);
+            if (Number.isNaN(v) || !lastAction) return;
+            lastAction.params[inp.dataset.key] = v;
+            lastAction.apply(lastAction.params);
+        };
+    });
+    panel.style.display = 'block';
 }
 
 // ─────────────────────────────────────────────────────────────
