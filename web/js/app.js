@@ -527,6 +527,7 @@ function renderTick(fromXR) {
     syncSectionPlane(); // real-time — clip plane follows the gizmo mesh if the user moved/rotated it
     stepWalkMovement(dt);
     updateAllPersistentDimensions();
+    updateAllRulers();
 
     if (isAnimPlaying) {
         animFrame = (animFrame % 250) + 1;
@@ -1782,6 +1783,185 @@ function rescaleEntireModel(ratio) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// RULER / PROTRACTOR (Blender: view3d_gizmo_ruler.cc) — evolves Tape
+// Measure above (a one-shot decorative Line frozen at the moment it was
+// drawn) into a persistent, forever-re-draggable measurement. Two real
+// handle spheres anchor the line — genuine sceneObjects entries, so the
+// ordinary transform gizmo already drags them like anything else, no new
+// drag machinery needed. Clicking ON the line itself (not a handle)
+// inserts a bend point there, turning it into a protractor with a live
+// interior-angle readout — exactly Blender's "grab the middle of an
+// existing ruler" UX. Rebuilds only on an actual handle-position change,
+// same pattern as updateAllPersistentDimensions() below.
+// ─────────────────────────────────────────────────────────────
+let persistentRulers = []; // { handles: [mesh, mesh, mesh?], group, isAngle, _lastKey }
+
+function createRulerHandle(point) {
+    const geo = new THREE.SphereGeometry(0.06, 12, 12);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x33ccff, depthTest: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(point);
+    mesh.renderOrder = 1000;
+    mesh.name = nextName('RulerHandle');
+    scene.add(mesh);
+    sceneObjects.push({ name: mesh.name, type: 'rulerhandle', mesh, level: activeLevelIndex });
+    return mesh;
+}
+
+function rulerPointsKey(pts) {
+    return pts.map(p => `${p.x.toFixed(5)},${p.y.toFixed(5)},${p.z.toFixed(5)}`).join('|');
+}
+
+function updateRulerGroup(r) {
+    while (r.group.children.length) {
+        const c = r.group.children.pop();
+        if (c.geometry) c.geometry.dispose();
+        if (c.material) { if (c.material.map) c.material.map.dispose(); c.material.dispose(); }
+    }
+    const pts = r.handles.map(h => h.position.clone());
+    const seg = (a, b) => {
+        const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineDashedMaterial({ color: 0x33ccff, dashSize: 0.15, gapSize: 0.08 }));
+        l.computeLineDistances();
+        return l;
+    };
+    if (!r.isAngle) {
+        const [p0, p1] = pts;
+        r.group.add(seg(p0, p1));
+        addDimensionDecorations(r.group, p0, p1, formatLength(p0.distanceTo(p1), 3));
+    } else {
+        const [p0, pB, p1] = pts;
+        r.group.add(seg(p0, pB));
+        r.group.add(seg(pB, p1));
+        const angleDeg = THREE.MathUtils.radToDeg(p0.clone().sub(pB).angleTo(p1.clone().sub(pB)));
+        const lenLabel = createDimensionSprite(`${formatLength(p0.distanceTo(pB), 2)} / ${formatLength(pB.distanceTo(p1), 2)}`);
+        lenLabel.position.copy(p0.clone().add(pB).add(p1).multiplyScalar(1 / 3)).add(new THREE.Vector3(0, 0, 0.15));
+        r.group.add(lenLabel);
+        const angleSprite = createDimensionSprite(`${angleDeg.toFixed(1)}°`);
+        angleSprite.position.copy(pB).add(new THREE.Vector3(0, 0, 0.35));
+        r.group.add(angleSprite);
+    }
+    r._lastKey = rulerPointsKey(pts);
+}
+
+// Called every frame — cheap: skips any ruler whose handles haven't
+// actually moved, and tears down (with its scene objects) any ruler whose
+// group or a handle was deleted directly, same defensive pattern as
+// updateAllPersistentDimensions() below.
+function updateAllRulers() {
+    if (!persistentRulers.length) return;
+    let changed = false;
+    persistentRulers.slice().forEach(r => {
+        const groupAlive = sceneObjects.some(o => o.mesh === r.group);
+        const handlesAlive = r.handles.every(h => sceneObjects.some(o => o.mesh === h));
+        if (!groupAlive || !handlesAlive) {
+            r.handles.forEach(h => { if (sceneObjects.some(o => o.mesh === h)) removeSceneObject(h); });
+            if (groupAlive) removeSceneObject(r.group);
+            persistentRulers = persistentRulers.filter(x => x !== r);
+            changed = true;
+            return;
+        }
+        const key = rulerPointsKey(r.handles.map(h => h.position));
+        if (key !== r._lastKey) { updateRulerGroup(r); changed = true; }
+    });
+    if (changed) markSceneDirty();
+}
+
+function updateRulerPreview(cursorPt) {
+    if (!sketchState || sketchState.tool !== 'ruler' || sketchState.points.length < 1) return;
+    clearSketchPreview();
+    const p0 = sketchState.points[0];
+    const geo = new THREE.BufferGeometry().setFromPoints([p0, cursorPt]);
+    sketchPreviewObj = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x33ccff, dashSize: 0.2, gapSize: 0.1 }));
+    sketchPreviewObj.computeLineDistances();
+    addDimensionDecorations(sketchPreviewObj, p0, cursorPt, formatLength(p0.distanceTo(cursorPt), 3));
+    scene.add(sketchPreviewObj);
+    setVCB('Ruler:', formatLength(p0.distanceTo(cursorPt), 3));
+}
+
+function finishRuler() {
+    const [p0, p1] = sketchState.points;
+    clearSketchPreview();
+    sketchState = null;
+    const hA = createRulerHandle(p0);
+    const hB = createRulerHandle(p1);
+    const group = new THREE.Group();
+    group.name = nextName('Ruler');
+    scene.add(group);
+    const r = { handles: [hA, hB], group, isAngle: false };
+    persistentRulers.push(r);
+    sceneObjects.push({ name: group.name, type: 'ruler', mesh: group, level: activeLevelIndex });
+    renderOutliner();
+    updateRulerGroup(r);
+    setVCB('Ruler:', formatLength(p0.distanceTo(p1), 3));
+    pushUndo({
+        undo() {
+            removeSceneObject(hA); removeSceneObject(hB); removeSceneObject(group);
+            persistentRulers = persistentRulers.filter(x => x !== r);
+        },
+        redo() {
+            scene.add(hA); sceneObjects.push({ name: hA.name, type: 'rulerhandle', mesh: hA, level: activeLevelIndex });
+            scene.add(hB); sceneObjects.push({ name: hB.name, type: 'rulerhandle', mesh: hB, level: activeLevelIndex });
+            scene.add(group); sceneObjects.push({ name: group.name, type: 'ruler', mesh: group, level: activeLevelIndex });
+            persistentRulers.push(r);
+            renderOutliner();
+        },
+    });
+}
+
+// Clicking on an EXISTING ruler's straight (non-angle) line, rather than
+// starting a fresh ruler, inserts a bend point there — reuses `_raycaster`
+// exactly as sketchPointFromEvent() just left it set up for this same
+// pointer event, so this must be called synchronously right after that.
+function tryInsertRulerBend() {
+    const targets = [];
+    persistentRulers.forEach(r => {
+        if (r.isAngle) return;
+        r.group.children.forEach(c => { if (c.isLine) targets.push({ line: c, r }); });
+    });
+    if (!targets.length) return false;
+    const hits = _raycaster.intersectObjects(targets.map(t => t.line), false);
+    if (!hits.length) return false;
+    const entry = targets.find(t => t.line === hits[0].object);
+    if (!entry) return false;
+    const r = entry.r;
+    const [hA, hB] = r.handles;
+    const bendPoint = createRulerHandle(hits[0].point.clone());
+    r.handles = [hA, bendPoint, hB];
+    r.isAngle = true;
+    updateRulerGroup(r);
+    renderOutliner();
+    setVCB('Ruler:', 'Bend point inserted — now a protractor');
+    pushUndo({
+        undo() {
+            r.handles = [hA, hB];
+            r.isAngle = false;
+            removeSceneObject(bendPoint);
+            updateRulerGroup(r);
+        },
+        redo() {
+            scene.add(bendPoint);
+            sceneObjects.push({ name: bendPoint.name, type: 'rulerhandle', mesh: bendPoint, level: activeLevelIndex });
+            r.handles = [hA, bendPoint, hB];
+            r.isAngle = true;
+            updateRulerGroup(r);
+            renderOutliner();
+        },
+    });
+    return true;
+}
+
+function handleRulerClick(pt) {
+    if (!sketchState || sketchState.tool !== 'ruler') {
+        if (tryInsertRulerBend()) return;
+        sketchState = { tool: 'ruler', points: [pt.clone()] };
+        setVCB('Ruler:', 'Click second point');
+        return;
+    }
+    sketchState.points.push(pt.clone());
+    finishRuler();
+}
+
+// ─────────────────────────────────────────────────────────────
 // DIMENSION ANNOTATIONS — a real, PERSISTENT linear dimension between two
 // objects, unlike Tape Measure above (a one-shot decorative Line frozen at
 // the moment it was drawn). Click two objects; the dimension keeps
@@ -2204,7 +2384,7 @@ function eraseAtEvent(pt, hitObject) {
 function setupSketchTools(canvas) {
     let pDown = { x: 0, y: 0 };
     const DRAG_TOOLS = ['rect', 'circle', 'polygon', 'pie'];
-    const CLICK_TOOLS = ['line', 'arc', 'tape', 'poly_build', 'wall', 'slab', 'rotrect', 'position_camera'];
+    const CLICK_TOOLS = ['line', 'arc', 'tape', 'ruler', 'poly_build', 'wall', 'slab', 'rotrect', 'position_camera'];
 
     canvas.addEventListener('pointerdown', e => {
         pDown = { x: e.clientX, y: e.clientY };
@@ -2239,6 +2419,7 @@ function setupSketchTools(canvas) {
         else if (activeTool === 'line') updateLinePreview(pt);
         else if (activeTool === 'arc') updateArcPreview(pt);
         else if (activeTool === 'tape') updateTapePreview(pt);
+        else if (activeTool === 'ruler') updateRulerPreview(pt);
         else if (activeTool === 'poly_build') updatePolyBuildPreview(pt);
         else if (activeTool === 'wall') updateWallPreview(pt);
         else if (activeTool === 'slab') updateSlabPreview(pt);
@@ -2272,11 +2453,12 @@ function setupSketchTools(canvas) {
         if (activeTool === 'circle') { finishCircle(pt); return; }
         if (activeTool === 'polygon') { finishPolygon(pt); return; }
         if (activeTool === 'pie') { finishPie(pt); return; }
-        if (wasDrag) return; // line/arc/tape/rotrect are click-driven; ignore accidental drags
+        if (wasDrag) return; // line/arc/tape/ruler/rotrect are click-driven; ignore accidental drags
         if (activeTool === 'line') handleLineClick(pt);
         else if (activeTool === 'arc') handleArcClick(pt);
         else if (activeTool === 'rotrect') handleRotRectClick(pt);
         else if (activeTool === 'tape') handleTapeClick(pt);
+        else if (activeTool === 'ruler') handleRulerClick(pt);
         else if (activeTool === 'poly_build') handlePolyBuildClick(pt);
         else if (activeTool === 'wall') handleWallClick(pt);
         else if (activeTool === 'slab') handleSlabClick(pt);
@@ -9789,6 +9971,14 @@ function sceneToJSON() {
                 const dim = persistentDimensions.find(d => d.group === o.mesh);
                 return { appType: 'dimension', appName: o.name, appLevel: o.level, appDimRefs: dim ? [dim.objA.name, dim.objB.name] : null };
             }
+            if (o.type === 'ruler') {
+                // Same r128 ObjectLoader Sprite/CanvasTexture round-trip
+                // failure as dimension groups above — skip the decorative
+                // children, save enough (handle names + angle flag) to
+                // rebuild fresh via updateRulerGroup() after load instead.
+                const r = persistentRulers.find(x => x.group === o.mesh);
+                return { appType: 'ruler', appName: o.name, appLevel: o.level, appRulerHandles: r ? r.handles.map(h => h.name) : null, appRulerIsAngle: r ? !!r.isAngle : false };
+            }
             o.mesh.updateMatrix();
             return { appType: o.type, appName: o.name, appLevel: o.level, object: o.mesh.toJSON() };
         }),
@@ -9816,6 +10006,7 @@ function loadSceneFromJSON(data) {
     sceneObjects = [];
     persistentDimensions = []; // stale refs would otherwise point at meshes this reload just removed
     _dimensionFirstObj = null;
+    persistentRulers = [];
     transformControls.detach();
     selectedObject = null;
     sectionPlaneMesh = null; // see newScene()'s identical reset for why this can't be left dangling
@@ -9826,6 +10017,7 @@ function loadSceneFromJSON(data) {
     const loader = new THREE.ObjectLoader();
     const uuidRemap = {}; // old uuid (from file) -> live object, for keyframe rehydration
     const dimEntries = []; // {name, refs: [nameA, nameB]} -- resolved into real dimension groups once every other object exists
+    const rulerEntries = []; // {name, handleNames, isAngle} -- resolved into real ruler groups once every rulerhandle mesh exists
 
     (data.objects || []).forEach(entry => {
         // Dimensions are never round-tripped through the object JSON at
@@ -9833,6 +10025,10 @@ function loadSceneFromJSON(data) {
         // group for it below, once every other object has loaded.
         if (entry.appType === 'dimension') {
             if (Array.isArray(entry.appDimRefs)) dimEntries.push({ name: entry.appName, refs: entry.appDimRefs });
+            return;
+        }
+        if (entry.appType === 'ruler') {
+            if (Array.isArray(entry.appRulerHandles)) rulerEntries.push({ name: entry.appName, handleNames: entry.appRulerHandles, isAngle: !!entry.appRulerIsAngle });
             return;
         }
         let obj;
@@ -9864,6 +10060,22 @@ function loadSceneFromJSON(data) {
         const dim = { objA: objA.mesh, objB: objB.mesh, group };
         persistentDimensions.push(dim);
         updateDimensionGroup(dim);
+    });
+
+    // Same re-link-by-name pattern for rulers — the handle meshes
+    // themselves already loaded normally above (plain spheres, no
+    // CanvasTexture, safe through ObjectLoader), so just find them by name
+    // and rebuild the group's decorative line/label children fresh.
+    rulerEntries.forEach(({ name, handleNames, isAngle }) => {
+        const handles = handleNames.map(hn => { const e = sceneObjects.find(o => o.name === hn); return e && e.mesh; }).filter(Boolean);
+        if (handles.length < 2) return;
+        const group = new THREE.Group();
+        group.name = name || nextName('Ruler');
+        scene.add(group);
+        sceneObjects.push({ name: group.name, type: 'ruler', mesh: group, level: 0 });
+        const r = { handles, group, isAngle: isAngle && handles.length === 3 };
+        persistentRulers.push(r);
+        updateRulerGroup(r);
     });
 
     keyframes = {};
