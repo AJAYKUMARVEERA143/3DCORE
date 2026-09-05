@@ -1020,6 +1020,7 @@
               <button onclick="exportClientPack()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Client Pack (ZIP)</button>
               <button onclick="takeViewportScreenshot()" style="width:100%; background:#3d3d3d; border:1px solid #555; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Screenshot View (F10)</button>
               <button onclick="renderStillImage()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;">Render Image</button>
+              <button onclick="openCinemaRender()" style="width:100%; background:#7b3fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer; margin-bottom:6px;" title="Real progressive GPU path tracing (offline preview) — accuracy improves over time, not real-time">Cinema Render (Path-Traced)</button>
               <button onclick="renderAnimationVideo()" style="width:100%; background:#2f6fdc; border:none; color:#fff; font-size:11px; padding:6px 0; border-radius:3px; cursor:pointer;">Render Animation (Video)</button>
               <div id="render-progress" style="font-size:10px; color:var(--b-text-sub); margin-top:6px;"></div>
             </div>
@@ -1129,6 +1130,25 @@
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); convertToGuide();" title="Select a drawn Line first">Make Guide (dashed)</div>
   <div class="top-menu-dropdown-sep"></div>
   <div class="top-menu-dropdown-item" onclick="toggleContextMenu(false); toggleLockSelected();" title="Prevents Move/Rotate/Scale until unlocked">Lock / Unlock</div>
+</div>
+
+<!-- ═══════════════════════════ CINEMA RENDER — real offline GPU path-tracing preview ═══════════════════════════ -->
+<!-- Runs entirely inside the isolated iframe below (web/cinema_render.html,
+     its own separately-namespaced modern Three.js) — see collectCinemaRenderScene()
+     in app.js for what real scene data is handed across, and docs/ROADMAP.md
+     for the full reasoning (this app's own viewport is real-time WebGL PBR
+     rasterization, not path tracing; this is a genuinely different, slower,
+     higher-fidelity offline mode, honestly labeled as such). -->
+<div id="cinema-render-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:900; align-items:center; justify-content:center; flex-direction:column;">
+  <div style="display:flex; gap:10px; align-items:center; margin-bottom:8px;">
+    <strong style="color:#fff; font-size:12px;">Cinema Render</strong>
+    <span id="cinema-render-status" style="color:#aaa; font-size:11px; min-width:160px;">Loading…</span>
+    <button class="transport-btn" onclick="stopCinemaRender()">Stop</button>
+    <button class="transport-btn" onclick="saveCinemaRenderImage()">Save Image</button>
+    <button class="transport-btn" onclick="closeCinemaRender()">Close</button>
+  </div>
+  <iframe id="cinema-render-frame" src="cinema_render.html" style="width:min(90vw,1024px); height:min(70vh,640px); border:1px solid #444; background:#000;"></iframe>
+  <div style="color:#888; font-size:10px; margin-top:8px; max-width:600px; text-align:center;">Real progressive path tracing — accuracy improves over several seconds to a few minutes depending on scene complexity. Not real-time, not AI-denoised.</div>
 </div>
 
 <!-- ═══════════════════════════ INFO MODAL — Help ▸ Keyboard Shortcuts / About ═══════════════════════════ -->

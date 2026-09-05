@@ -5042,6 +5042,116 @@ function renderStillImage() {
     setVCB('Render:', `Image ${w}×${h} rendered`);
 }
 
+// ─────────────────────────────────────────────────────────────
+// CINEMA RENDER — a real, offline, progressive GPU path-tracing preview,
+// distinct from the always-live WebGL-PBR viewport above (which is real-
+// time rasterization, not path tracing — see /api/status's own honest
+// `renderer_label`). Runs in an isolated `<iframe>` (web/cinema_render.html)
+// with its own separately-namespaced modern Three.js instance (the real
+// path-tracing library needs r180+; this app is pinned to r128 — see
+// docs/ROADMAP.md for the full reasoning), fed scene DATA collected here,
+// never a live THREE.Object3D reference (cross-instance objects between
+// two different Three.js module copies aren't reliable). Static image
+// output only this pass, matching Blender's own F12 Render Image rather
+// than a real-time path-traced viewport, which the library itself doesn't
+// target for non-trivial scenes.
+// ─────────────────────────────────────────────────────────────
+function collectCinemaRenderScene() {
+    const meshes = exportableMeshObjects().map(o => {
+        const mesh = o.mesh;
+        mesh.updateMatrixWorld(true);
+        ensureNonIndexed(mesh);
+        const geo = mesh.geometry;
+        const pos = geo.attributes.position;
+        const norm = geo.attributes.normal;
+        const mat = primaryMaterial(mesh) || {};
+        return {
+            name: mesh.name,
+            positions: Array.from(pos.array),
+            normals: norm ? Array.from(norm.array) : null,
+            matrix: mesh.matrixWorld.toArray(),
+            material: {
+                color: mat.color ? '#' + mat.color.getHexString() : '#cccccc',
+                roughness: mat.roughness != null ? mat.roughness : 0.6,
+                metalness: mat.metalness != null ? mat.metalness : 0.05,
+                emissive: mat.emissive ? '#' + mat.emissive.getHexString() : '#000000',
+                emissiveIntensity: mat.emissiveIntensity != null ? mat.emissiveIntensity : 1,
+            },
+        };
+    });
+
+    const lights = sceneObjects.filter(o => o.type === 'light' && o.mesh).map(o => {
+        const l = o.mesh;
+        const kind = l.isDirectionalLight ? 'directional' : l.isSpotLight ? 'spot' : l.isRectAreaLight ? 'area' : 'point';
+        return {
+            kind,
+            color: '#' + l.color.getHexString(),
+            intensity: l.intensity != null ? l.intensity : 1,
+            position: l.position.toArray(),
+            target: (kind === 'directional' && l.target) ? l.target.position.toArray() : null,
+        };
+    });
+
+    let bg = '#1a1a1a';
+    if (scene.background && scene.background.isColor) bg = '#' + scene.background.getHexString();
+
+    return {
+        meshes,
+        lights,
+        camera: { position: camera.position.toArray(), target: orbitControls.target.toArray(), fov: camera.fov, aspect: camera.aspect },
+        background: bg,
+    };
+}
+
+// The iframe starts loading (and importing its CDN modules — several
+// seconds) as soon as the browser parses its markup, which happens well
+// before this script tag runs. Attaching the 'load' listener here, once,
+// at script-parse time rather than lazily inside openCinemaRender(), is
+// what actually catches it — attaching a fresh listener inside
+// openCinemaRender() itself missed the load event entirely whenever the
+// user opened the modal after the iframe had already finished loading
+// (its `onload` had already fired with nobody listening yet), leaving the
+// button silently do nothing — caught by test_cinema_render.js before
+// this shipped.
+(function initCinemaRenderFrame() {
+    const frame = document.getElementById('cinema-render-frame');
+    if (frame) frame.addEventListener('load', () => { frame.dataset.loaded = '1'; });
+})();
+
+function openCinemaRender() {
+    const modal = document.getElementById('cinema-render-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    const frame = document.getElementById('cinema-render-frame');
+    const send = () => frame.contentWindow.postMessage({ type: 'cinema-render-scene', scene: collectCinemaRenderScene() }, '*');
+    if (frame.dataset.loaded === '1') send();
+    else frame.addEventListener('load', function onFirstLoad() { frame.dataset.loaded = '1'; frame.removeEventListener('load', onFirstLoad); send(); });
+}
+
+function closeCinemaRender() {
+    const modal = document.getElementById('cinema-render-modal');
+    if (modal) modal.style.display = 'none';
+    stopCinemaRender();
+}
+
+function stopCinemaRender() {
+    const frame = document.getElementById('cinema-render-frame');
+    if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type: 'cinema-render-stop' }, '*');
+}
+
+function saveCinemaRenderImage() {
+    const frame = document.getElementById('cinema-render-frame');
+    if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type: 'cinema-render-save' }, '*');
+}
+
+window.addEventListener('message', e => {
+    const msg = e.data;
+    if (!msg || msg.type !== 'cinema-render-status') return;
+    const el = document.getElementById('cinema-render-status');
+    if (el) el.textContent = msg.text || '';
+    if (msg.saveDataUrl) triggerDownload(msg.saveDataUrl, `3DCore_CinemaRender_${Date.now()}.png`);
+});
+
 // Viewport screenshot — what is on screen now (current camera, quality, canvas
 // size). Distinct from Render Image, which resizes to the Output panel
 // resolution and optional 2×/4× supersample.

@@ -246,6 +246,8 @@ function startServers(opts) {
         if (req.method === 'GET') {
             if (p === '/' || p === '/index.html') {
                 serveStatic(res, path.join(webDir, 'index.html'), 'text/html; charset=utf-8');
+            } else if (p === '/cinema_render.html') {
+                serveStatic(res, path.join(webDir, 'cinema_render.html'), 'text/html; charset=utf-8');
             } else if (WEB_STATIC_PREFIXES.some(prefix => p.startsWith(prefix))) {
                 const full = safeFileUnder(webDir, p);
                 if (!full) { res.writeHead(404); res.end(); return; }

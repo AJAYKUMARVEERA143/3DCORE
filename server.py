@@ -401,6 +401,11 @@ class StudioHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         # Static web files
         if path in ('/', '/index.html'):
             self._serve_static(os.path.join(WEB_DIR, 'index.html'), 'text/html; charset=utf-8')
+        elif path == '/cinema_render.html':
+            # The isolated Cinema Render iframe document (see docs/ROADMAP.md)
+            # — served explicitly since it isn't under any of the generic
+            # static prefixes below (those cover /js /css /icons only).
+            self._serve_static(os.path.join(WEB_DIR, 'cinema_render.html'), 'text/html; charset=utf-8')
         elif any(path.startswith(prefix) for prefix in _WEB_STATIC_PREFIXES):
             full = safe_file_under(WEB_DIR, path.lstrip('/'))
             if not full:

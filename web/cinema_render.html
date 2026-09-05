@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cinema Render</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+<!--
+  Isolated on purpose: this document has its own `window`/global scope,
+  completely separate from the parent app's `window.THREE` (r128, used by
+  ~15,000 lines of web/js/app.js). three-gpu-pathtracer needs Three.js
+  r180+, which has shipped no classic <script> build since r161 -- ES
+  modules are mandatory, hence the import map below rather than another
+  CDN <script> tag. Real, currently-published, MIT-licensed packages:
+  three@0.180.0 (the exact minimum three-gpu-pathtracer's package.json
+  requires), three-mesh-bvh@0.9.14 (its own peer dependency), and
+  three-gpu-pathtracer@0.0.24 itself. Loaded as real ES module source
+  straight from jsDelivr's npm mirror (each package's own "module" entry,
+  not a bundled/minified blob), so the bare `import ... from 'three'`
+  inside three-mesh-bvh's and three-gpu-pathtracer's own source resolves
+  to this exact pinned instance via the import map, not a second one.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.14/src/index.js",
+    "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.24/src/index.js"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module" src="./js/cinema_render.js"></script>
+</body>
+</html>
