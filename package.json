@@ -1,0 +1,54 @@
+{
+  "name": "3d-core-studio",
+  "version": "1.0.0",
+  "description": "3D Core Studio — browser CAD/3D editor, packaged as a desktop app. WebGL PBR viewport, not a path tracer (see docs/ROADMAP.md).",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "electron": "electron .",
+    "electron:dev": "electron . --dev",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "build": {
+    "appId": "com.3dcorestudio.app",
+    "productName": "3D Core Studio",
+    "asar": true,
+    "files": [
+      "electron/**/*",
+      "web/**/*",
+      "package.json",
+      "!web/**/*.map"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "electron/build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "electron/build/icon.icns",
+      "category": "public.app-category.graphics-design"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "electron/build/icon.png",
+      "category": "Graphics"
+    }
+  }
+}

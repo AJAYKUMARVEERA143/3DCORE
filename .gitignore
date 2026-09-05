@@ -13,3 +13,12 @@ assets/DeepFurniture/
 
 # Local Claude Code session state (process id/timestamps), not project content.
 .claude/*.lock
+
+# Electron desktop packaging (added 2026-09) — npm dependency tree and
+# electron-builder's build output, neither of which belongs in git; the
+# real source (electron/main.js, electron/server.js, electron/build/icon.*,
+# package.json) IS tracked.
+node_modules/
+dist/
+dist-electron/
+*.log

@@ -23,7 +23,9 @@ Requires Python 3 (standard library only — no `pip install` for the app).
 
 Optional env: `PORT` (default 8000), `THREED_CORE_HOST` (default `0.0.0.0` for LAN P2P). Signaling WebSocket listens on `PORT + 1`.
 
-There is **no** npm build or linter config. Integrity checks:
+**Desktop (Electron) build** — an additive packaging layer, not a second implementation of the editor: `web/` is loaded completely unchanged; `electron/server.js` is a Node port of `server.py`'s real endpoints (static files, the AI proxy, the TexVerse catalog, LAN WS signaling) so the packaged app needs no Python at end-user runtime. `npm install` once, then `npm run electron` (dev) or `npm run dist:win`/`dist:mac`/`dist:linux` (real installers via electron-builder). This is the **only** place npm is used — the web app itself still has no build step.
+
+There is **no** npm build or linter config for the web app itself (the Electron packaging layer is separate — see above). Integrity checks:
 
 ```bash
 python3 -m unittest tests.test_integrity
@@ -42,7 +44,8 @@ ROADMAP also refers to Playwright scripts that are not in this tree.
 | `web/js/zip_store.js` | Client ZIP pack |
 | `web/index.html` | UI shell |
 | `web/css/style.css` | Styles |
-| `server.py` | HTTP + WebSocket signaling |
+| `server.py` | HTTP + WebSocket signaling (browser mode) |
+| `electron/main.js`, `electron/server.js` | Desktop (Electron) packaging — loads the same `web/` unchanged; `server.js` is server.py's endpoints ported to Node |
 | `assets/` | Local GLBs / texture datasets |
 | `scripts/` | Launchers |
 
