@@ -5056,6 +5056,42 @@ function renderStillImage() {
 // than a real-time path-traced viewport, which the library itself doesn't
 // target for non-trivial scenes.
 // ─────────────────────────────────────────────────────────────
+// RectAreaLight -> a real emissive quad mesh, not a Light object. A path
+// tracer's own NEE (next-event-estimation) lighting already treats any
+// sufficiently emissive mesh surface as a real light source — that IS how
+// area lights work in a real path tracer (confirmed studying Cycles' own
+// real source: "emissive materials... get MIS" — an emissive mesh, not a
+// non-physical Light node). RectAreaLight has no true physical unit
+// conversion applied here (documented, not pretended precise) — intensity
+// is divided down by a flat factor so typical scene values (hundreds,
+// matching this app's own point/spot light defaults) read as a
+// reasonably bright emissive quad rather than blown-out white.
+function rectAreaLightToMeshEntry(light) {
+    light.updateMatrixWorld(true);
+    const w = (light.width || 1) / 2, h = (light.height || 1) / 2;
+    // A flat quad in the light's local XY plane, facing -Z to match
+    // RectAreaLight's own real emission direction (three.js convention).
+    const positions = [
+        -w, -h, 0, w, -h, 0, w, h, 0,
+        -w, -h, 0, w, h, 0, -w, h, 0,
+    ];
+    const normals = [0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1];
+    const emissiveIntensity = Math.max(0.1, (light.intensity != null ? light.intensity : 1) / 15);
+    return {
+        name: light.name || 'AreaLight',
+        positions,
+        normals,
+        matrix: light.matrixWorld.toArray(),
+        material: {
+            color: '#000000',
+            roughness: 1,
+            metalness: 0,
+            emissive: '#' + light.color.getHexString(),
+            emissiveIntensity,
+        },
+    };
+}
+
 function collectCinemaRenderScene() {
     const meshes = exportableMeshObjects().map(o => {
         const mesh = o.mesh;
@@ -5080,16 +5116,18 @@ function collectCinemaRenderScene() {
         };
     });
 
-    const lights = sceneObjects.filter(o => o.type === 'light' && o.mesh).map(o => {
+    const lights = [];
+    sceneObjects.filter(o => o.type === 'light' && o.mesh).forEach(o => {
         const l = o.mesh;
-        const kind = l.isDirectionalLight ? 'directional' : l.isSpotLight ? 'spot' : l.isRectAreaLight ? 'area' : 'point';
-        return {
+        if (l.isRectAreaLight) { meshes.push(rectAreaLightToMeshEntry(l)); return; }
+        const kind = l.isDirectionalLight ? 'directional' : l.isSpotLight ? 'spot' : 'point';
+        lights.push({
             kind,
             color: '#' + l.color.getHexString(),
             intensity: l.intensity != null ? l.intensity : 1,
             position: l.position.toArray(),
             target: (kind === 'directional' && l.target) ? l.target.position.toArray() : null,
-        };
+        });
     });
 
     let bg = '#1a1a1a';

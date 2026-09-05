@@ -83,14 +83,12 @@ function buildSceneFromData(data) {
         } else if (l.kind === 'spot') {
             light = new THREE.SpotLight(l.color, l.intensity);
             light.position.fromArray(l.position);
-        } else if (l.kind === 'area') {
-            // Approximated as a point light for this first pass — a real
-            // area light in a path tracer is normally an emissive mesh
-            // surface (see the module comment above), not a Light object;
-            // documented here rather than silently mis-rendered as 0 light.
-            light = new THREE.PointLight(l.color, l.intensity);
-            light.position.fromArray(l.position);
         } else {
+            // 'point', and the fallback for anything else — RectAreaLight
+            // never reaches here at all: the parent converts it to a real
+            // emissive mesh (rectAreaLightToMeshEntry() in app.js) before
+            // this data is even sent, since a real area light in a path
+            // tracer is an emissive surface, not a Light node.
             light = new THREE.PointLight(l.color, l.intensity);
             light.position.fromArray(l.position);
         }
